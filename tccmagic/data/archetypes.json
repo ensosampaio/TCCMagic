@@ -1,0 +1,60 @@
+{
+  "_comment": "Tabela fixa de afinidade arquétipo × atributo usada pelo plano de sideboarding (Games 2/3). Relevância(carta, arquétipo) = afinidade[arquétipo] · v(carta). Representa o conhecimento do jogador, e não a 'verdade' do simulador.",
+  "affinity": {
+    "aggro": {
+      "eficiencia_mana": 0.7,
+      "remocao": 1.0,
+      "anti_aggro": 1.0,
+      "anti_combo": 0.0,
+      "anti_cemiterio": 0.0,
+      "anti_artefato_encantamento": 0.2,
+      "interacao_pilha": 0.1,
+      "vantagem_cartas": 0.3,
+      "pressao": 0.2
+    },
+    "control": {
+      "eficiencia_mana": 0.5,
+      "remocao": 0.1,
+      "anti_aggro": 0.0,
+      "anti_combo": 0.2,
+      "anti_cemiterio": 0.2,
+      "anti_artefato_encantamento": 0.1,
+      "interacao_pilha": 0.5,
+      "vantagem_cartas": 1.0,
+      "pressao": 1.0
+    },
+    "midrange": {
+      "eficiencia_mana": 0.5,
+      "remocao": 0.8,
+      "anti_aggro": 0.3,
+      "anti_combo": 0.5,
+      "anti_cemiterio": 0.2,
+      "anti_artefato_encantamento": 0.5,
+      "interacao_pilha": 0.3,
+      "vantagem_cartas": 0.7,
+      "pressao": 0.6
+    },
+    "combo": {
+      "eficiencia_mana": 0.6,
+      "remocao": 0.2,
+      "anti_aggro": 0.0,
+      "anti_combo": 1.0,
+      "anti_cemiterio": 0.7,
+      "anti_artefato_encantamento": 0.5,
+      "interacao_pilha": 0.7,
+      "vantagem_cartas": 0.1,
+      "pressao": 0.8
+    },
+    "ramp": {
+      "eficiencia_mana": 0.5,
+      "remocao": 0.4,
+      "anti_aggro": 0.0,
+      "anti_combo": 1.0,
+      "anti_cemiterio": 0.0,
+      "anti_artefato_encantamento": 0.7,
+      "interacao_pilha": 0.4,
+      "vantagem_cartas": 0.1,
+      "pressao": 0.9
+    }
+  }
+}
