@@ -5,6 +5,8 @@ Pipeline em Python que otimiza um **sideboard de 15 cartas** para um **maindeck 
 aprende pesos para 9 atributos de carta, e não IDs de cartas. O valor de cada sideboard é medido pela
 taxa de vitória em séries **Melhor de 3** contra uma suíte de oponentes do metajogo.
 
+> Documentação completa, organizada por tema: [DOCS/README.md](DOCS/README.md).
+
 ## Execução rápida
 
 ```bash
@@ -22,8 +24,23 @@ Com o MTG Forge instalado:
 ```bash
 python main.py --engine forge \
   --forge-jar /opt/forge/forge-gui-desktop-X.Y.Z-jar-with-dependencies.jar \
-  --forge-dir /opt/forge --matches 10 --population 20 --generations 15 --workers 4
+  --forge-dir /opt/forge --matches 30 --population 16 --generations 8 --workers 4
+
+# Antes de otimizar: mede só o Game 1 (maindeck vs. cada oponente), com IC de 95%
+python main.py --engine forge --game1-check 100 --workers 4
 ```
+
+Opções ligadas ao ruído das partidas simuladas:
+
+| Opção | Efeito |
+|---|---|
+| `--matches N` | séries Bo3 por oponente em cada rodada de avaliação |
+| `--validation-matches N` | séries novas por oponente na validação final (padrão: 5 × `--matches`) |
+| `--resample` / `--no-resample` | reavaliar a população a cada geração (padrão: ligado no Forge) |
+| `--game1-check N` | joga N Games 1 contra cada oponente e sai, sem otimizar |
+| `--plan aleatorio\|afinidade` | plano de troca nos Games 2/3 (padrão: `aleatorio`) |
+| `--plan-block N` | séries consecutivas que compartilham o mesmo sorteio de trocas (padrão: 10) |
+| `--plan-seed N` | semente dos sorteios de troca |
 
 ## Estrutura
 
@@ -34,10 +51,11 @@ python main.py --engine forge \
 | `tccmagic/data/*.json` | Maindeck, pool de candidatas, oponentes e tabela de afinidade por arquétipo |
 | `tccmagic/decoder.py` | Chaves → pesos → Score → Top-15 |
 | `tccmagic/brkga.py` | `BRKGA_Optimizer` genérico (elite 20%, mutantes 15%, cruzamento 65%, ρ = 0,70) |
-| `tccmagic/sideboarding.py` | Plano de troca por afinidade para os Games 2/3 |
+| `tccmagic/sideboarding.py` | Planos de troca para os Games 2/3 (sorteado ou por afinidade) |
+| `tccmagic/analysis.py` | Efeito estimado de cada carta que entra/sai, a partir das trocas sorteadas |
 | `tccmagic/simulation/` | Motores (`SurrogateEngine`, `ForgeEngine`) e orquestração `Bo3Simulator` |
-| `tccmagic/fitness.py` | Fitness com cache e `ProcessPoolExecutor` |
-| `tccmagic/pipeline.py` | Experimento completo e histórico por geração |
+| `tccmagic/fitness.py` | Fitness com cache, reamostragem e `ProcessPoolExecutor` |
+| `tccmagic/pipeline.py` | Experimento completo, histórico por geração e validação final |
 | `tccmagic/export.py` | Exportação JSON / XLSX |
 | `main.py` | Exemplo executável (`if __name__ == "__main__"`) |
 
@@ -73,27 +91,89 @@ Com `δ = 0` a fórmula é a pura, e todas as cópias de uma carta empatam e ent
 
 A cada geração a população é ordenada pelo fitness. Os 20% de elite passam intactos, 15% são mutantes
 aleatórios e 65% são filhos de um pai elite com um não-elite; cada gene vem do pai elite com
-probabilidade 0,70. Os elites não são reavaliados. Há parada antecipada opcional (`--stall N`).
+probabilidade 0,70. Há parada antecipada opcional (`--stall N`).
 O otimizador não sabe nada de Magic: recebe apenas uma função `população → fitness`.
+
+Com fitness determinístico (motor substituto) os elites não são reavaliados. Com fitness ruidoso
+(Forge), `reevaluate_elites=True` reavalia a população inteira a cada geração e, ao final, joga uma
+rodada extra só para a elite antes de escolher o melhor. Nesse modo o melhor fitness pode cair de
+uma geração para a outra, e a parada antecipada conta gerações sem troca de líder.
 
 ## 4. Simulação Bo3 e fitness
 
 - **Game 1**: maindeck vs. oponente. Quem começa alterna entre as séries (equilíbrio play/draw exato).
   É calculado uma única vez, porque o maindeck não muda.
-- **Games 2 e 3**: deck pós-sideboard para o arquétipo do oponente. O perdedor do jogo anterior começa.
-  O Game 3 só acontece em série 1–1.
-- **Plano de sideboarding**: `Rel(c, A) = afinidade[A] · v(c)`. A melhor carta do side entra no lugar
-  da pior carta `flex` do main enquanto `Rel(entra) > Rel(sai)`, até 5 trocas (`--max-swaps`).
+- **Games 2 e 3**: deck pós-sideboard montado pelo plano de troca. O perdedor do jogo anterior
+  começa. O Game 3 só acontece em série 1–1.
+- **Terrenos nunca saem.** Só cartas marcadas `"flex": true` podem sair, e um terreno marcado como
+  flex é recusado no carregamento: a base de mana mantém a mesma quantidade de terrenos.
+- **Plano aleatório** (`--plan aleatorio`, padrão): nenhuma regra fixa decide a troca. Para cada
+  bloco de `--plan-block` séries sorteia-se o número de trocas (1 a `--max-swaps`), quais cópias
+  do sideboard entram (sorteio uniforme entre as 15) e quais cópias flex do maindeck saem. Uma
+  carta nunca sai para dar lugar a ela mesma. O sorteio depende só de (semente, oponente, bloco),
+  e não do sideboard: dois sideboards que contêm as cartas sorteadas recebem o mesmo plano
+  (números aleatórios comuns). O fitness passa a medir quanto o sideboard rende quando as trocas
+  são feitas às cegas, e o efeito de cada carta é estimado depois (seção abaixo).
+- **Plano por afinidade** (`--plan afinidade`):
+  `Rel(c, A) = [Σ_{i=2..9} a_i · v_i(c)] · (1 + a_1 · v_1(c))`, com `a = afinidade[A]`. A melhor
+  carta do side entra no lugar da pior carta `flex` do main enquanto `Rel(entra) > Rel(sai)`, até
+  `--max-swaps` trocas. O plano é o mesmo em todas as séries contra o oponente.
 - **Fitness** = WinRate_Bo3 ponderada pela participação no metajogo. Como WinRate_Md1 é constante
   entre indivíduos, maximizar Bo3 equivale a maximizar **ΔWinRate = WinRate_Bo3 − WinRate_Md1**.
-- **Cache**: vários vetores de pesos geram o mesmo Top-15, e cada sideboard distinto é simulado uma
-  única vez.
-- **Paralelismo**: sideboards novos são distribuídos com `ProcessPoolExecutor` (`--workers`).
+- **Cache de sideboards**: vários vetores de pesos geram o mesmo Top-15, e os resultados de cada
+  sideboard distinto são guardados e reaproveitados.
+- **Cache de jogos**: o resultado de um jogo depende só do deck pós-side, e não do sideboard que o
+  originou. Cada jogo fica guardado por (oponente, deck, série, jogo, quem começa), e sideboards
+  diferentes que levam ao mesmo deck reaproveitam os jogos em vez de simulá-los de novo. Em cada
+  fase (todos os G2, depois todos os G3) os jogos que faltam são agrupados em um lote por
+  (oponente, deck), ou seja, uma chamada ao Forge por deck distinto.
+- **Reamostragem** (motores estocásticos): a cada geração, todo sideboard da população joga mais uma
+  rodada de `--matches` séries, somada às anteriores. O fitness é a taxa acumulada, então um
+  sideboard que teve sorte em poucas séries regride à sua taxa real em vez de ficar no topo.
+- **Paralelismo**: os lotes de jogos são distribuídos com `ProcessPoolExecutor` (`--workers`).
+
+### Efeito das trocas sorteadas
+
+Com o plano aleatório, todos os jogos pós-side simulados (busca e validação, cada jogo contado uma
+vez) formam um experimento aleatorizado. Para cada oponente ajusta-se
+
+```
+P(vitória) = α + Σ_c β_c · (cópias de c que entraram) − Σ_f γ_f · (cópias de f que saíram)
+```
+
+com a média dos γ (ponderada pelas cópias flex) fixada em zero, já que toda troca põe uma carta e
+tira outra. O relatório, o JSON (`swap_analysis`) e a aba `Efeito_Trocas` do XLSX trazem:
+
+- **entra**: β_c, o ganho por jogo ao colocar uma cópia de c no lugar de uma carta flex qualquer;
+- **sai**: −γ_f, o ganho ao tirar f em vez de uma flex qualquer (positivo = f faz pouca falta);
+- erro padrão robusto (HC1), IC de 95% e a média ponderada pelo metajogo de cada carta.
+
+Os intervalos tratam os jogos como independentes. G2 e G3 da mesma série compartilham o plano, então
+os intervalos são um pouco otimistas.
+
+**Custo no Forge.** Cada deck distinto custa uma inicialização da JVM (~16 s). Com `--plan-block 10`
+e 30 séries, cada sideboard joga 3 decks por oponente e rodada, em vez de 1. O cache de jogos
+compensa parte disso, porque sideboards parecidos sorteiam os mesmos decks.
+
+### Validação final
+
+O fitness do melhor indivíduo da busca é **otimista por construção**: é o máximo de muitas
+estimativas ruidosas. Por isso os números do relatório não saem da busca. Ao final, o sideboard
+escolhido e a linha de base **sem sideboard** (Games 2/3 com o maindeck) jogam
+`--validation-matches` séries novas por oponente, sobre os mesmos Games 1, e o relatório traz:
+
+- WinRate Md1, Bo3 e ΔWinRate da validação, com erro padrão;
+- o **ganho atribuível ao sideboard** (Bo3 com side − Bo3 sem side) com intervalo de confiança de
+  95% (conservador: ignora que os Games 1 são compartilhados);
+- se o intervalo inclui zero, o ganho não é distinguível do ruído com aquelas séries.
+
+O erro padrão do fitness de uma rodada é de até `0,5 · sqrt(Σ share² / n)`, cerca de `0,22/√n`
+com cinco oponentes de peso parecido: ±0,16 com 2 séries, ±0,04 com 30, ±0,02 com 100.
 
 > **Cuidado ao interpretar ΔWinRate.** Mesmo sem sideboard, a taxa de vitória de séries Bo3 difere
 > da taxa por jogo: o formato amplifica taxas diferentes de 50%, e o oponente também faz sideboard.
-> Por isso o relatório inclui a linha de base **"Bo3 sem sideboard"** e o **ganho atribuível ao
-> sideboard** (Bo3 com side − Bo3 sem side). Essa é a medida mais limpa do efeito das 15 cartas.
+> Por isso a medida mais limpa do efeito das 15 cartas é o ganho sobre a linha de base
+> "Bo3 sem sideboard", e não o ΔWinRate.
 
 ### Motor substituto (`--engine surrogate`)
 
@@ -119,7 +199,11 @@ Grava os decks em `.dck`, executa `java -jar <forge.jar> sim -d A.dck B.dck -n N
 (com o diretório do Forge como `cwd`) e extrai o vencedor de cada jogo do `stdout` por regex
 (`ForgeConfig.win_pattern` / `draw_pattern`, configuráveis). Limitações:
 
-- a CLI não permite escolher quem começa, então o play/draw é ignorado;
+- a CLI não permite escolher quem começa, então o play/draw é ignorado. Os jogos de uma chamada
+  `-n` formam um único *match* do Forge: o primeiro começa por sorteio e, nos seguintes, começa o
+  perdedor do jogo anterior do lote;
+- a IA do Forge não pilota bem todos os decks (em especial os de combo). Use `--game1-check` para
+  ver a taxa de vitória do Game 1 por oponente antes de confiar em um confronto;
 - a IA do Forge não faz sideboard, por isso cada fase (G1, G2, G3) roda como um lote separado
   com o deck correto;
 - o texto de saída pode mudar entre versões do Forge. Se o parser falhar, `ForgeError` mostra o
