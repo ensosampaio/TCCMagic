@@ -12,7 +12,11 @@ Ciclo de uma geração (Gonçalves & Resende, 2011):
     └── Cruzamento(65%) → filho de 1 pai elite × 1 pai não-elite;
                           cada gene vem do pai elite com prob. ρ = 0,70
 
-Os elites mantêm o fitness já calculado (não são reavaliados).
+Por padrão os elites mantêm o fitness já calculado (não são reavaliados), o que
+é correto para um fitness determinístico. Com um fitness ruidoso (partidas
+simuladas), use ``reevaluate_elites=True``: a população inteira é reavaliada a
+cada geração, para que um indivíduo que teve sorte uma vez não fique na elite
+para sempre.
 """
 
 from __future__ import annotations
@@ -87,11 +91,13 @@ class BRKGA_Optimizer:  # noqa: N801 — nome definido na especificação do TCC
         fitness_function: FitnessFunction,
         config: BRKGAConfig | None = None,
         on_generation: Callable[[GenerationStats], None] | None = None,
+        reevaluate_elites: bool = False,
     ):
         self.n = chromosome_length
         self.fitness_function = fitness_function
         self.config = config or BRKGAConfig()
         self.on_generation = on_generation
+        self.reevaluate_elites = reevaluate_elites
         self.rng = np.random.default_rng(self.config.seed)
         self.population: np.ndarray = np.empty((0, self.n))
         self.fitness: np.ndarray = np.empty(0)
@@ -139,8 +145,24 @@ class BRKGA_Optimizer:  # noqa: N801 — nome definido na especificação do TCC
         newcomers = np.vstack([offspring, mutants])
 
         self.population = np.vstack([elites, newcomers])
-        self.fitness = np.concatenate([self.fitness[: cfg.n_elite], self._evaluate(newcomers)])
+        if self.reevaluate_elites:
+            self.fitness = self._evaluate(self.population)
+        else:
+            self.fitness = np.concatenate([self.fitness[: cfg.n_elite], self._evaluate(newcomers)])
         self._sort()
+
+    def refresh_elites(self) -> None:
+        """Reavalia só a elite e a reordena (desempate final sob fitness ruidoso).
+
+        Logo após ``step`` o líder pode ser um recém-chegado avaliado uma única
+        vez; esta rodada extra faz o melhor final ter sido confirmado ao menos
+        uma vez.
+        """
+        n = self.config.n_elite
+        fitness = self._evaluate(self.population[:n])
+        order = np.argsort(-fitness, kind="stable")
+        self.population[:n] = self.population[:n][order]
+        self.fitness[:n] = fitness[order]
 
     def _stats(self, generation: int, start: float) -> GenerationStats:
         return GenerationStats(
@@ -166,10 +188,17 @@ class BRKGA_Optimizer:  # noqa: N801 — nome definido na especificação do TCC
             if self.on_generation:
                 self.on_generation(stats)
 
-            # O elitismo garante que o melhor nunca piora; ">" detecta melhora estrita.
-            if stats.best_fitness > result.best_fitness:
-                result.best_fitness = stats.best_fitness
-                result.best_keys = stats.best_keys
+            if self.reevaluate_elites:
+                # Fitness ruidoso: vale a estimativa atual do líder (que pode cair
+                # ao ser reavaliada); "melhora" significa troca de líder.
+                improved = not np.array_equal(stats.best_keys, result.best_keys)
+                result.best_fitness, result.best_keys = stats.best_fitness, stats.best_keys
+            else:
+                # O elitismo garante que o melhor nunca piora; ">" detecta melhora estrita.
+                improved = stats.best_fitness > result.best_fitness
+                if improved:
+                    result.best_fitness, result.best_keys = stats.best_fitness, stats.best_keys
+            if improved:
                 stall = 0
             elif generation > 0:
                 stall += 1
@@ -177,4 +206,8 @@ class BRKGA_Optimizer:  # noqa: N801 — nome definido na especificação do TCC
             if limit is not None and stall >= limit:
                 result.stopped_early = True
                 break
+
+        if self.reevaluate_elites:
+            self.refresh_elites()
+            result.best_fitness, result.best_keys = float(self.fitness[0]), self.population[0].copy()
         return result

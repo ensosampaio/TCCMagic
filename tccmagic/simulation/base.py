@@ -28,6 +28,8 @@ class MatchEngine(ABC):
 
     #: nome exibido nos relatórios
     name: str = "engine"
+    #: True se repetir o mesmo jogo (mesmo deck e ``GameSpec``) dá sempre o mesmo resultado
+    deterministic: bool = False
 
     @abstractmethod
     def play_games(self, deck: Deck, opponent: Opponent, specs: Sequence[GameSpec]) -> list[bool]:

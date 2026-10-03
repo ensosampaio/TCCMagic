@@ -55,6 +55,17 @@
       "interacao_pilha": 0.4,
       "vantagem_cartas": 0.1,
       "pressao": 0.9
+    },
+    "auras": {
+      "eficiencia_mana": 0.6,
+      "remocao": 0.1,
+      "anti_aggro": 0.5,
+      "anti_combo": 0.0,
+      "anti_cemiterio": 0.0,
+      "anti_artefato_encantamento": 1.0,
+      "interacao_pilha": 0.3,
+      "vantagem_cartas": 0.1,
+      "pressao": 0.5
     }
   }
 }

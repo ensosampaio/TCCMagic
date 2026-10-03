@@ -59,6 +59,7 @@ class SurrogateConfig:
 
 class SurrogateEngine(MatchEngine):
     name = "surrogate"
+    deterministic = True
 
     def __init__(self, maindeck: Deck, config: SurrogateConfig | None = None):
         self.config = config or SurrogateConfig()

@@ -3,16 +3,27 @@
 Usa o modo de simulação da linha de comando do Forge:
 
     java -jar forge-gui-desktop-<versão>-jar-with-dependencies.jar \\
-         sim -d <deck_a.dck> <deck_b.dck> -n <jogos>
+         sim -d <deck1> <deck2> -n <jogos>
 
 e extrai o vencedor de cada jogo do ``stdout`` via expressão regular. O Forge
 nomeia os jogadores IA como ``Ai(<n>)-<nome do deck>``; por isso gravamos os
 decks com nomes-marcadores únicos e verificamos qual marcador aparece na linha
 de vitória.
 
+Apesar do texto de ajuda do Forge (``forge.exe sim -h``) sugerir que ``-d``
+aceita um caminho de arquivo arbitrário, a build testada (2.0.15) ignora esse
+caminho e só localiza decks dentro da pasta de perfil do usuário
+(``decks/constructed``); por isso os ``.dck`` temporários são gravados ali (ver
+``_decks_dir``). Eles são referenciados pelo *nome do arquivo com extensão*:
+assim o Forge lê apenas aquele arquivo. Passar só o nome do deck faz o Forge
+carregar a pasta inteira, o que quebra com vários workers em paralelo (um
+processo tenta ler um ``.dck`` temporário que outro acabou de apagar).
+
 Limitações conhecidas (documentadas para o TCC):
 * A CLI do Forge não permite escolher quem começa jogando; ``GameSpec.on_play``
-  é ignorado por este motor.
+  é ignorado por este motor. Os jogos de uma chamada ``-n`` formam um único
+  *match* do Forge: o primeiro jogo começa por sorteio e, nos seguintes, começa
+  o perdedor do jogo anterior do lote (que pertence a outra série).
 * A IA do Forge não faz sideboarding entre jogos; por isso a orquestração do
   Bo3 é feita em Python (ver ``simulation/bo3.py``), jogando cada fase
   (G1, G2, G3) como um lote de jogos independentes com o deck apropriado.
@@ -26,7 +37,7 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
+import sys
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +48,22 @@ from tccmagic.simulation.base import GameSpec, MatchEngine
 
 PLAYER_TAG = "TCCPlayer"
 OPPONENT_TAG = "TCCOpponent"
+
+
+def _decks_dir() -> Path:
+    """Pasta ``decks/constructed`` do perfil de usuário do Forge.
+
+    O Forge guarda decks do usuário fora do diretório de instalação (que
+    contém apenas os recursos somente-leitura em ``res/``), em um local
+    padrão por sistema operacional, análogo ao usado pelo próprio Forge.
+    """
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "Forge"
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "Forge"
+    else:
+        base = Path.home() / ".forge"
+    return base / "decks" / "constructed"
 
 
 class ForgeError(RuntimeError):
@@ -55,7 +82,6 @@ class ForgeConfig:
     extra_args: tuple[str, ...] = ()
     timeout_per_game: float = 180.0
     startup_timeout: float = 120.0
-    work_dir: str | None = None
     win_pattern: str = r"Game\s+(\d+)\s+ended in\s+\d+\s*ms\.\s*(.+?)\s+has won!"
     draw_pattern: str = r"Game\s+(\d+)\s+ended in a [Dd]raw"
     env: dict[str, str] = field(default_factory=dict)
@@ -95,10 +121,10 @@ class ForgeEngine(MatchEngine):
         if shutil.which(config.java_executable) is None:
             raise ForgeError(f"Executável Java não encontrado: {config.java_executable}")
 
-    def build_command(self, deck_a: Path, deck_b: Path, n_games: int) -> list[str]:
+    def build_command(self, deck_a_file: str, deck_b_file: str, n_games: int) -> list[str]:
         cfg = self.config
         cmd = [cfg.java_executable, *cfg.java_options, "-jar", str(Path(cfg.jar_path).resolve()),
-               "sim", "-d", str(deck_a), str(deck_b), "-n", str(n_games)]
+               "sim", "-d", deck_a_file, deck_b_file, "-n", str(n_games)]
         if cfg.game_format:
             cmd += ["-f", cfg.game_format]
         return cmd + list(cfg.extra_args)
@@ -107,16 +133,22 @@ class ForgeEngine(MatchEngine):
         if not specs:
             return []
         n_games = len(specs)
-        with tempfile.TemporaryDirectory(dir=self.config.work_dir, prefix="forge_") as tmp:
-            token = uuid.uuid4().hex[:8]
-            deck_a = Path(tmp) / f"{PLAYER_TAG}_{token}.dck"
-            deck_b = Path(tmp) / f"{OPPONENT_TAG}_{token}.dck"
-            deck_a.write_text(Deck(PLAYER_TAG, deck.cards).to_forge_dck(), encoding="utf-8")
-            deck_b.write_text(Deck(OPPONENT_TAG, opponent.deck.cards).to_forge_dck(), encoding="utf-8")
+        decks_dir = _decks_dir()
+        decks_dir.mkdir(parents=True, exist_ok=True)
+        token = uuid.uuid4().hex[:8]
+        name_a, name_b = f"{PLAYER_TAG}_{token}", f"{OPPONENT_TAG}_{token}"
+        deck_a = decks_dir / f"{name_a}.dck"
+        deck_b = decks_dir / f"{name_b}.dck"
+        # O Forge só localiza o deck pelo nome se o campo ``Name=`` do metadata
+        # for idêntico ao nome do arquivo (sem extensão) — não basta conter o
+        # marcador PLAYER_TAG/OPPONENT_TAG como substring.
+        deck_a.write_text(Deck(name_a, deck.cards).to_forge_dck(), encoding="utf-8")
+        deck_b.write_text(Deck(name_b, opponent.deck.cards).to_forge_dck(), encoding="utf-8")
 
+        try:
             try:
                 proc = subprocess.run(
-                    self.build_command(deck_a, deck_b, n_games),
+                    self.build_command(deck_a.name, deck_b.name, n_games),
                     cwd=self.config.forge_dir,
                     capture_output=True,
                     text=True,
@@ -125,6 +157,9 @@ class ForgeEngine(MatchEngine):
                 )
             except subprocess.TimeoutExpired as exc:
                 raise ForgeError(f"Forge excedeu o tempo limite ({exc.timeout:.0f}s) vs {opponent.name}.") from exc
+        finally:
+            deck_a.unlink(missing_ok=True)
+            deck_b.unlink(missing_ok=True)
 
         if proc.returncode != 0:
             raise ForgeError(f"Forge terminou com código {proc.returncode}:\n{proc.stderr[-2000:]}")

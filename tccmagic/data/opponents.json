@@ -15,41 +15,41 @@
         }
       },
       "decklist": {
-        "Scion of Draco": 4, "Territorial Kavu": 4, "Nishoba Brawler": 4,
-        "Ragavan, Nimble Pilferer": 4, "Leyline of the Guildpact": 4, "Tribal Flames": 4,
-        "Lightning Bolt": 4, "Stubborn Denial": 4, "Force of Negation": 3, "Leyline Binding": 2,
-        "Arid Mesa": 4, "Wooded Foothills": 4, "Windswept Heath": 3, "Flooded Strand": 1,
-        "Sacred Foundry": 1, "Stomping Ground": 1, "Steam Vents": 1, "Breeding Pool": 1,
-        "Temple Garden": 1, "Hallowed Fountain": 1, "Godless Shrine": 1, "Watery Grave": 1,
-        "Overgrown Tomb": 1, "Blood Crypt": 1, "Mountain": 1
+        "Arena of Glory": 2, "Arid Mesa": 4, "Blood Crypt": 1, "Consign to Memory": 2,
+        "Flooded Strand": 4, "Indatha Triome": 1, "Leyline Binding": 4,
+        "Leyline of the Guildpact": 4, "Lightning Bolt": 4, "Lush Portico": 1, "Mountain": 1,
+        "Phelia, Exuberant Shepherd": 3, "Plains": 1, "Quantum Riddler": 4,
+        "Ragavan, Nimble Pilferer": 4, "Scion of Draco": 4, "Spell Snare": 1, "Steam Vents": 2,
+        "Stubborn Denial": 2, "Teferi, Time Raveler": 1, "Temple Garden": 1, "Territorial Kavu": 4,
+        "Thundering Falls": 1, "Wooded Foothills": 4
       }
     },
     {
-      "name": "Jeskai Control",
-      "archetype": "control",
+      "name": "Esper Blink",
+      "archetype": "midrange",
       "meta_share": 0.18,
       "surrogate": {
-        "base_logit": 0.2,
+        "base_logit": 0.0,
         "postboard_penalty": 0.15,
         "vulnerability": {
-          "eficiencia_mana": 0.6, "remocao": 0.05, "anti_aggro": 0.0, "anti_combo": 0.2,
-          "anti_cemiterio": 0.1, "anti_artefato_encantamento": 0.05, "interacao_pilha": 0.3,
-          "vantagem_cartas": 1.0, "pressao": 0.9
+          "eficiencia_mana": 0.6, "remocao": 0.8, "anti_aggro": 0.2, "anti_combo": 0.2,
+          "anti_cemiterio": 0.3, "anti_artefato_encantamento": 0.4, "interacao_pilha": 0.3,
+          "vantagem_cartas": 0.6, "pressao": 0.7
         }
       },
       "decklist": {
-        "Counterspell": 4, "Lightning Bolt": 4, "Prismatic Ending": 3, "Supreme Verdict": 2,
-        "Teferi, Hero of Dominaria": 3, "Memory Deluge": 4, "Solitude": 3, "Force of Negation": 2,
-        "Consider": 3, "Snapcaster Mage": 2, "Wrath of the Skies": 2, "Phlage, Titan of Fire's Fury": 2,
-        "Flooded Strand": 4, "Scalding Tarn": 4, "Arid Mesa": 2, "Hallowed Fountain": 2,
-        "Steam Vents": 2, "Sacred Foundry": 1, "Raugrin Triome": 2, "Spirebluff Canal": 2,
-        "Island": 2, "Plains": 2, "Mountain": 1, "Otawara, Soaring City": 1,
-        "Eiganjo, Seat of the Empire": 1
+        "Swamp": 1, "Flickerwisp": 3, "Phelia, Exuberant Shepherd": 4, "Flooded Strand": 4,
+        "Witch Enchanter": 4, "Thoughtseize": 4, "Fatal Push": 4, "Ephemerate": 3,
+        "Hallowed Fountain": 1, "Teferi, Time Raveler": 2, "Polluted Delta": 1,
+        "Undercity Sewers": 1, "Shadowy Backstreet": 1, "Meticulous Archive": 1,
+        "Prismatic Ending": 1, "Watery Grave": 1, "Emperor of Bones": 3, "Solitude": 4, "Plains": 2,
+        "Boggart Trawler": 1, "Godless Shrine": 2, "Marsh Flats": 4, "Overlord of the Balemurk": 4,
+        "Quantum Riddler": 4
       }
     },
     {
       "name": "Eldrazi Tron",
-      "archetype": "midrange",
+      "archetype": "ramp",
       "meta_share": 0.20,
       "surrogate": {
         "base_logit": -0.1,
@@ -69,49 +69,46 @@
       }
     },
     {
-      "name": "Amulet Titan",
-      "archetype": "ramp",
+      "name": "Izzet Prowess",
+      "archetype": "aggro",
       "meta_share": 0.20,
       "surrogate": {
-        "base_logit": -0.2,
-        "postboard_penalty": 0.20,
+        "base_logit": 0.0,
+        "postboard_penalty": 0.10,
         "vulnerability": {
-          "eficiencia_mana": 0.5, "remocao": 0.4, "anti_aggro": 0.0, "anti_combo": 1.0,
-          "anti_cemiterio": 0.05, "anti_artefato_encantamento": 0.6, "interacao_pilha": 0.2,
-          "vantagem_cartas": 0.1, "pressao": 0.7
+          "eficiencia_mana": 0.8, "remocao": 1.0, "anti_aggro": 0.9, "anti_combo": 0.05,
+          "anti_cemiterio": 0.15, "anti_artefato_encantamento": 0.2, "interacao_pilha": 0.1,
+          "vantagem_cartas": 0.2, "pressao": 0.2
         }
       },
       "decklist": {
-        "Amulet of Vigor": 4, "Primeval Titan": 4, "Arboreal Grazer": 4, "Spelunking": 4,
-        "Summoner's Pact": 4, "Scapeshift": 3, "Dryad of the Ilysian Grove": 3,
-        "Cultivator Colossus": 2, "Azusa, Lost but Seeking": 4, "Explore": 2,
-        "Simic Growth Chamber": 4, "Gruul Turf": 2, "Boros Garrison": 1, "Selesnya Sanctuary": 1,
-        "Urza's Saga": 3, "Tolaria West": 2, "Slayers' Stronghold": 1, "Vesuva": 1,
-        "Lotus Field": 1, "Forest": 2, "Castle Garenbrig": 1, "Otawara, Soaring City": 1,
-        "Boseiju, Who Endures": 1, "Hanweir Battlefield": 1, "Crumbling Vestige": 1,
-        "Echoing Deeps": 1, "Breeding Pool": 2
+        "Dragon's Rage Channeler": 4, "Thundering Falls": 1, "Expressive Iteration": 2, "Arid Mesa": 3,
+        "Lightning Bolt": 4, "Stormchaser's Talent": 2, "Scalding Tarn": 3, "Preordain": 4,
+        "Boomerang Basics": 4, "Mutagenic Growth": 2, "Mountain": 2, "Slickshot Show-Off": 2,
+        "Cori-Steel Cutter": 4, "Mishra's Bauble": 4, "Tormod's Crypt": 2, "Steam Vents": 4,
+        "Monastery Swiftspear": 4, "Fiery Islet": 1, "Bloodstained Mire": 4, "Lava Dart": 4
       }
     },
     {
-      "name": "Living End",
-      "archetype": "combo",
+      "name": "Bogles",
+      "archetype": "auras",
       "meta_share": 0.20,
       "surrogate": {
-        "base_logit": -0.2,
-        "postboard_penalty": 0.20,
+        "base_logit": 0.0,
+        "postboard_penalty": 0.10,
         "vulnerability": {
-          "eficiencia_mana": 0.4, "remocao": 0.2, "anti_aggro": 0.1, "anti_combo": 0.6,
-          "anti_cemiterio": 1.0, "anti_artefato_encantamento": 0.0, "interacao_pilha": 0.5,
-          "vantagem_cartas": 0.1, "pressao": 0.6
+          "eficiencia_mana": 0.5, "remocao": 0.2, "anti_aggro": 0.5, "anti_combo": 0.1,
+          "anti_cemiterio": 0.0, "anti_artefato_encantamento": 1.0, "interacao_pilha": 0.2,
+          "vantagem_cartas": 0.1, "pressao": 0.4
         }
       },
       "decklist": {
-        "Living End": 4, "Shardless Agent": 4, "Demonic Dread": 4, "Violent Outburst": 4,
-        "Street Wraith": 4, "Architects of Will": 4, "Striped Riverwinder": 4,
-        "Curator of Mysteries": 3, "Subtlety": 3, "Force of Negation": 2, "Grief": 2,
-        "Misty Rainforest": 4, "Verdant Catacombs": 3, "Scalding Tarn": 2, "Breeding Pool": 2,
-        "Blood Crypt": 1, "Stomping Ground": 1, "Watery Grave": 1, "Overgrown Tomb": 1,
-        "Ketria Triome": 2, "Zagoth Triome": 1, "Forest": 1, "Swamp": 1, "Island": 1, "Mountain": 1
+        "Audacity": 1, "Forest": 2, "Shardmage's Rescue": 1, "Sheltered by Ghosts": 4,
+        "Horizon Canopy": 4, "Slippery Bogle": 4, "Hyena Umbra": 4, "Razorverge Thicket": 4,
+        "Gladecover Scout": 4, "Spirit Mantle": 1, "Branchloft Pathway": 3, "Ethereal Armor": 4,
+        "Alpha Authority": 1, "Brushland": 4, "Daybreak Coronet": 4, "Gryff's Boon": 3, "Rancor": 4,
+        "Cartouche of Solidarity": 1, "Sentinel's Eyes": 1, "Light-Paws, Emperor's Voice": 4,
+        "Plains": 2
       }
     }
   ]
