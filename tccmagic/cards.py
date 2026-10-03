@@ -107,8 +107,12 @@ class Deck:
         return [c for c in self.expanded() if not c.is_land]
 
     def flex_cards(self) -> list[Card]:
-        """Cópias do maindeck elegíveis para sair no sideboarding."""
-        return [c for c in self.expanded() if c.flex]
+        """Cópias do maindeck elegíveis para sair no sideboarding.
+
+        Terrenos nunca saem: a base de mana fica com a mesma quantidade de
+        terrenos nos Games 2/3, como no sideboarding real.
+        """
+        return [c for c in self.expanded() if c.flex and not c.is_land]
 
     def swap(self, cards_out: Iterable[Card], cards_in: Iterable[Card], name: str | None = None) -> "Deck":
         """Retorna um novo deck com ``cards_out`` removidas e ``cards_in`` adicionadas."""
@@ -203,6 +207,8 @@ def load_maindeck(path: Path) -> Deck:
     for card, count in deck.cards:
         if card.name not in BASIC_LANDS and count > MAX_COPIES:
             raise ValueError(f"'{card.name}' excede {MAX_COPIES} cópias no maindeck.")
+        if card.is_land and card.flex:
+            raise ValueError(f"'{card.name}' é terreno e não pode ser 'flex': terrenos não saem no sideboarding.")
     return deck
 
 

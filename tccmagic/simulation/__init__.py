@@ -1,7 +1,7 @@
 """Módulo 3 — Simulação de partidas Bo3 (motores Forge e substituto)."""
 
 from tccmagic.simulation.base import GameSpec, MatchEngine
-from tccmagic.simulation.bo3 import Bo3Simulator, EvaluationReport, MatchupReport
+from tccmagic.simulation.bo3 import Bo3Simulator, EvaluationReport, MatchupReport, wilson_interval
 from tccmagic.simulation.forge import ForgeConfig, ForgeEngine, ForgeError
 from tccmagic.simulation.surrogate import SurrogateConfig, SurrogateEngine
 
@@ -16,4 +16,5 @@ __all__ = [
     "MatchupReport",
     "SurrogateConfig",
     "SurrogateEngine",
+    "wilson_interval",
 ]
