@@ -39,9 +39,23 @@ from tccmagic.pipeline import (
 )
 from tccmagic.simulation import ForgeConfig, SurrogateConfig, wilson_interval
 
-# Instalação local do Forge usada para desenvolvimento/testes neste ambiente.
-DEFAULT_FORGE_DIR = r"C:\Users\Enso\Desktop\Artigo TCC\Forge"
-DEFAULT_FORGE_JAR = str(Path(DEFAULT_FORGE_DIR) / "forge-gui-desktop-2.0.15-jar-with-dependencies.jar")
+
+def load_dotenv(path: Path = Path(__file__).with_name(".env")) -> None:
+    """Carrega pares CHAVE=VALOR do .env em os.environ, sem sobrescrever variáveis já definidas."""
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+# Instalação local do Forge: definida em FORGE_DIR e FORGE_JAR no arquivo .env.
+load_dotenv()
+DEFAULT_FORGE_DIR = os.environ.get("FORGE_DIR", "")
+DEFAULT_FORGE_JAR = os.environ.get("FORGE_JAR", "")
 
 # Arquivo de jogos pós-side: fixo, e não dentro de --out, para acumular entre execuções.
 DEFAULT_GAMES_DIR = str(Path("resultados") / "jogos")
