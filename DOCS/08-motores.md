@@ -95,7 +95,7 @@ Módulo: `tccmagic/simulation/forge.py`. Executa partidas reais entre IAs do MTG
    do `.dck` é idêntico ao nome do arquivo.
 2. Executa, com o diretório do Forge como `cwd`:
    ```
-   java -Xmx4096m -Djava.awt.headless=true -jar <forge.jar> sim -d <A>.dck <B>.dck -n <N> [-f formato]
+   java -Xmx1536m -Djava.awt.headless=true -jar <forge.jar> sim -d <A>.dck <B>.dck -n <N> [-f formato]
    ```
 3. Lê o `stdout` e extrai o vencedor de cada jogo por expressão regular.
 4. Apaga os `.dck` temporários, mesmo em caso de erro.
@@ -107,11 +107,13 @@ Módulo: `tccmagic/simulation/forge.py`. Executa partidas reais entre IAs do MTG
 | `jar_path` | — (obrigatório) | JAR do Forge |
 | `forge_dir` | `None` | Diretório de instalação (contém `res/`), usado como `cwd` |
 | `java_executable` | `java` | Executável Java |
-| `java_options` | `-Xmx4096m -Djava.awt.headless=true` | Opções da JVM |
+| `java_options` | `-Xmx1536m -Djava.awt.headless=true` | Opções da JVM |
 | `game_format` | `None` | Valor de `-f` (ex.: `Constructed`) |
 | `extra_args` | `()` | Argumentos extras |
 | `timeout_per_game` | 180 s | Tempo-limite por jogo |
 | `startup_timeout` | 120 s | Tempo-limite de inicialização. Total = `startup + por_jogo × N` |
+| `retries` | 3 | Repetições do lote quando o Forge sai com erro (ex.: JVM sem memória) |
+| `retry_wait` | 30 s | Espera antes de repetir (cresce a cada tentativa: 30, 60, 90 s) |
 | `win_pattern` | `Game\s+(\d+)\s+ended in\s+\d+\s*ms\.\s*(.+?)\s+has won!` | Regex de vitória |
 | `draw_pattern` | `Game\s+(\d+)\s+ended in a [Dd]raw` | Regex de empate |
 | `env` | `{}` | Variáveis de ambiente extras |
@@ -120,7 +122,7 @@ Módulo: `tccmagic/simulation/forge.py`. Executa partidas reais entre IAs do MTG
 
 - JAR ou Java não encontrados (verificado na criação do motor);
 - tempo-limite excedido;
-- código de saída diferente de zero (mostra o final do `stderr`);
+- código de saída diferente de zero após todas as tentativas (mostra o final do `stdout` e do `stderr`);
 - número de resultados diferente do pedido, ou vencedor não reconhecido (mostra as últimas 20
   linhas do `stdout`, para ajustar a regex).
 

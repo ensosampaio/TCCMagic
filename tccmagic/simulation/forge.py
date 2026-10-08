@@ -38,6 +38,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -76,12 +77,18 @@ class ForgeConfig:
     # Diretório de instalação do Forge (contém a pasta ``res/``); usado como cwd.
     forge_dir: str | None = None
     java_executable: str = "java"
-    java_options: tuple[str, ...] = ("-Xmx4096m", "-Djava.awt.headless=true")
+    # O heap de uma simulação fica abaixo de ~700 MB; o teto menor impede que
+    # vários workers juntos esgotem a memória da máquina.
+    java_options: tuple[str, ...] = ("-Xmx1536m", "-Djava.awt.headless=true")
     # Formato passado com ``-f`` (ex.: "Constructed"); None omite a opção.
     game_format: str | None = None
     extra_args: tuple[str, ...] = ()
     timeout_per_game: float = 180.0
     startup_timeout: float = 120.0
+    # Falhas do processo (ex.: a JVM sem memória) costumam ser passageiras: o
+    # lote é repetido após uma espera antes de abortar o experimento.
+    retries: int = 3
+    retry_wait: float = 30.0
     win_pattern: str = r"Game\s+(\d+)\s+ended in\s+\d+\s*ms\.\s*(.+?)\s+has won!"
     draw_pattern: str = r"Game\s+(\d+)\s+ended in a [Dd]raw"
     env: dict[str, str] = field(default_factory=dict)
@@ -146,21 +153,31 @@ class ForgeEngine(MatchEngine):
         deck_b.write_text(Deck(name_b, opponent.deck.cards).to_forge_dck(), encoding="utf-8")
 
         try:
-            try:
-                proc = subprocess.run(
-                    self.build_command(deck_a.name, deck_b.name, n_games),
-                    cwd=self.config.forge_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.config.startup_timeout + self.config.timeout_per_game * n_games,
-                    env={**os.environ, **self.config.env},
-                )
-            except subprocess.TimeoutExpired as exc:
-                raise ForgeError(f"Forge excedeu o tempo limite ({exc.timeout:.0f}s) vs {opponent.name}.") from exc
+            for attempt in range(self.config.retries + 1):
+                try:
+                    proc = subprocess.run(
+                        self.build_command(deck_a.name, deck_b.name, n_games),
+                        cwd=self.config.forge_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=self.config.startup_timeout + self.config.timeout_per_game * n_games,
+                        env={**os.environ, **self.config.env},
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    raise ForgeError(f"Forge excedeu o tempo limite ({exc.timeout:.0f}s) vs {opponent.name}.") from exc
+                if proc.returncode == 0:
+                    break
+                if attempt < self.config.retries:
+                    time.sleep(self.config.retry_wait * (attempt + 1))
         finally:
             deck_a.unlink(missing_ok=True)
             deck_b.unlink(missing_ok=True)
 
         if proc.returncode != 0:
-            raise ForgeError(f"Forge terminou com código {proc.returncode}:\n{proc.stderr[-2000:]}")
+            # A JVM escreve erros fatais (ex.: falta de memória) no stdout, não no stderr.
+            raise ForgeError(
+                f"Forge terminou com código {proc.returncode} vs {opponent.name} "
+                f"({self.config.retries + 1} tentativas).\n"
+                f"--- stdout ---\n{proc.stdout[-2000:]}\n--- stderr ---\n{proc.stderr[-2000:]}"
+            )
         return parse_forge_output(proc.stdout, n_games, self.config)
