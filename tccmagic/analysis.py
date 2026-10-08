@@ -31,7 +31,7 @@ from __future__ import annotations
 import math
 from collections import Counter
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -142,11 +142,17 @@ def analyze_opponent(rows: Sequence[tuple[Sequence[str], Sequence[str], bool]], 
                                 float(est[0]), tuple(effects))
 
 
-def analyze_swaps(games: Mapping[GameKey, bool], database: Database) -> list[OpponentSwapAnalysis]:
-    """Efeito de cada carta trocada, por oponente, a partir de todos os jogos pós-side simulados."""
+def analyze_swaps(games: Mapping[GameKey, bool] | Iterable[tuple[GameKey, bool]],
+                  database: Database) -> list[OpponentSwapAnalysis]:
+    """Efeito de cada carta trocada, por oponente, a partir de todos os jogos pós-side simulados.
+
+    ``games`` é o cache do simulador ou uma sequência de (chave, venceu); a
+    sequência permite somar jogos de várias execuções (ver ``tccmagic/archive.py``).
+    """
     flex_counts = Counter(c.name for c in database.maindeck.flex_cards())
     by_opponent: dict[str, list[tuple[Sequence[str], Sequence[str], bool]]] = {}
-    for (opponent, (cards_in, cards_out), _, game_number, _), won in games.items():
+    records = games.items() if isinstance(games, Mapping) else games
+    for (opponent, (cards_in, cards_out), _, game_number, _), won in records:
         if game_number >= 2:
             by_opponent.setdefault(opponent, []).append((cards_in, cards_out, won))
     results = []
