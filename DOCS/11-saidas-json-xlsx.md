@@ -6,6 +6,12 @@ Módulo: `tccmagic/export.py`. Ao final de cada execução, `main.py` grava em `
 - `resultado.json`: tudo, inclusive a configuração completa;
 - `resultado.xlsx`: as mesmas informações em abas, para gráficos e tabelas do TCC.
 
+Assim que a busca termina, antes da validação final, `main.py` grava também
+`resultado_parcial.json`: o mesmo formato de `resultado.json`, com `"validation": null` e a
+análise de trocas só com os jogos da busca. Se a validação falhar (ex.: o Forge cair), esse
+arquivo preserva o sideboard encontrado, os pesos e o histórico de gerações. Quando a execução
+termina normalmente ele é apagado, substituído pelo `resultado.json` completo.
+
 ## `resultado.json`
 
 ### Topo
@@ -19,6 +25,7 @@ Módulo: `tccmagic/export.py`. Ao final de cada execução, `main.py` grava em `
 | `resampled` | A reamostragem estava ativa |
 | `games_simulated` | Jogos pós-side simulados pelo motor |
 | `games_reused` | Jogos pós-side reaproveitados do cache |
+| `games_from_archive` | Jogos de execuções anteriores somados à análise das trocas |
 | `final` | Melhor indivíduo da busca (estimativa **otimista**) |
 | `validation` | Validação com séries novas (os números que valem) |
 | `swap_analysis` | Efeito das trocas sorteadas |
@@ -108,11 +115,42 @@ Cada item de `matchups` tem `opponent`, `archetype`, `meta_share`, `n_matches`, 
 
 Valores em `Efeito_Trocas` estão em **proporção** (0,05 = 5 pp).
 
+## `comparacao.json`
+
+Gravado por `python main.py --compare ...`
+([10](10-validacao-e-analise-de-trocas.md#comparação-de-sideboards)).
+
+| Chave | Conteúdo |
+|---|---|
+| `config`, `maindeck`, `elapsed_seconds` | Como em `resultado.json` |
+| `n_matches` | Séries novas por oponente |
+| `games_simulated`, `games_reused`, `games_from_archive` | Como em `resultado.json` |
+| `candidates` | Um por sideboard, com a linha de base `sem_sideboard` por último: `name`, `cards` (pares `[carta, cópias]`), o relatório de avaliação e `stderr_bo3` |
+| `comparisons` | `candidate`, `reference`, `gain` (Bo3 do candidato − Bo3 da referência), `stderr` (pareado, por blocos), `ci95`, `significant` |
+| `swap_analysis` | Como em `resultado.json` |
+
+## `comparacao.xlsx`
+
+| Aba | Linhas | Colunas |
+|---|---|---|
+| `Candidatos` | Uma por candidato | `sideboard`, `cartas`, `series`, `winrate_md1`, `winrate_bo3`, `erro_padrao_bo3`, `winrate_pos_side` |
+| `Comparacoes` | Uma por par comparado | `sideboard`, `comparado_com`, `ganho_bo3`, `erro_padrao_pareado`, `ic95_inferior`, `ic95_superior`, `significativo` |
+| `Matchups` | Candidatos × oponentes | `sideboard` e as colunas de `Matchups` |
+| `Efeito_Trocas` | Como em `resultado.xlsx` | — |
+| `Resumo` | Métrica / valor | Maindeck, motor, plano, séries, jogos simulados, reaproveitados e do arquivo, tempo |
+
+## Arquivo de jogos (`resultados/jogos/*.json`)
+
+Um arquivo por execução: `context` (identificador de motor + decks), `engine`, `saved_at` e `games`,
+uma lista de `[oponente, [cartas que entraram], [cartas que saíram], série, jogo, começou jogando,
+venceu]`.
+
 ## Qual número usar no texto
 
 | Pergunta | Onde |
 |---|---|
 | O sideboard melhora o deck? | `validation.gain`, `gain_ci95`, `significant` |
+| O sideboard otimizado supera o de referência? | `comparacao.json`: `comparisons` com `candidate` = `otimizado` e `reference` = `referencia` |
 | Desempenho por confronto | `validation.sideboard.matchups` comparado com `validation.baseline_no_sideboard.matchups` |
 | Que cartas trocar contra cada oponente | `swap_analysis.opponents[].effects` |
 | Que cartas mais valem no metajogo | `swap_analysis.metagame` |

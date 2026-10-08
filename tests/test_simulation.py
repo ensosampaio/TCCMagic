@@ -6,12 +6,24 @@ import numpy as np
 import pytest
 
 from tccmagic.analysis import analyze_swaps, metagame_effects
+from tccmagic.archive import GameArchive
 from tccmagic.brkga import BRKGA_Optimizer, BRKGAConfig
-from tccmagic.cards import Deck, Opponent, load_database
+from tccmagic.cards import Deck, Opponent, load_database, load_reference_sideboard
 from tccmagic.decoder import SideboardDecoder
-from tccmagic.export import export_json, export_xlsx
+from tccmagic.export import export_comparison_json, export_comparison_xlsx, export_json, export_xlsx
 from tccmagic.fitness import FitnessEvaluator
-from tccmagic.pipeline import ExperimentConfig, Validation, measure_game1, run_experiment
+from tccmagic.pipeline import (
+    NO_SIDEBOARD,
+    Candidate,
+    ExperimentConfig,
+    Validation,
+    compare_sideboards,
+    measure_game1,
+    paired_comparison,
+    random_sideboard,
+    run_experiment,
+    sideboard_from_names,
+)
 from tccmagic.simulation import Bo3Simulator, ForgeConfig, ForgeError, GameSpec, MatchEngine, SurrogateEngine
 from tccmagic.simulation.forge import OPPONENT_TAG, PLAYER_TAG, parse_forge_output
 
@@ -374,7 +386,140 @@ def test_experiment_validates_best_and_baseline_on_fresh_series(tmp_path):
     assert data["validation"]["gain"] == pytest.approx(validation.gain)
 
 
+def test_search_result_is_handed_over_before_validation(tmp_path, monkeypatch):
+    """Se a validação falhar, o resultado da busca já foi entregue (e pode ser gravado)."""
+    def fail(self, sideboards, n_matches):
+        raise ForgeError("falha na validação")
+
+    monkeypatch.setattr(FitnessEvaluator, "validate", fail)
+    cfg = ExperimentConfig(matches_per_opponent=20, brkga=BRKGAConfig(population_size=12, generations=2, seed=1))
+    path = tmp_path / "parcial.json"
+    with pytest.raises(ForgeError):
+        run_experiment(cfg, on_search_done=lambda partial: export_json(partial, path))
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["validation"] is None
+    assert len(data["final"]["sideboard"]) == 15 and len(data["history"]) == 3
+    assert data["swap_analysis"]["opponents"]
+
+
 def test_measure_game1_reports_wins_per_opponent(db):
     results = measure_game1(ExperimentConfig(), 40)
     assert [opp.name for opp, _ in results] == [o.name for o in db.opponents]
     assert all(0 <= wins <= 40 for _, wins in results)
+
+
+# --------------------------------------------------------------------------- #
+# Arquivo de jogos
+# --------------------------------------------------------------------------- #
+
+def test_game_archive_round_trip_and_context(tmp_path):
+    key = ("Bogles", (("Wear // Tear",), ("Solitude",)), 7, 2, True)
+    first = GameArchive(tmp_path, "contexto-a")
+    assert first.previous == [] and first.save({}) is None  # execução sem jogos não cria arquivo
+    first.save({key: True})
+    first.save({key: True, (*key[:3], 3, False): False})  # regrava o arquivo da própria execução
+
+    second = GameArchive(tmp_path, "contexto-a")
+    assert dict(second.previous) == {key: True, (*key[:3], 3, False): False}
+    assert second.path != first.path
+    # Motor ruidoso: o mesmo deck e a mesma série, jogados de novo, são um jogo novo.
+    assert len(second.merged({key: False}, deterministic=False)) == 3
+    # Motor determinístico: a mesma chave é o mesmo jogo, contado uma vez.
+    assert len(second.merged({key: True}, deterministic=True)) == 2
+
+    other = GameArchive(tmp_path, "contexto-b")  # outro motor ou outros decks
+    assert other.previous == [] and other.skipped_runs == 1
+
+
+def test_archived_games_feed_the_swap_analysis_but_not_the_results(tmp_path):
+    def run(games_dir, plan_seed):
+        cfg = ExperimentConfig(matches_per_opponent=20, plan_seed=plan_seed, games_dir=games_dir,
+                               brkga=BRKGAConfig(population_size=8, generations=1, seed=1))
+        return run_experiment(cfg)
+
+    first = run(str(tmp_path), plan_seed=1)
+    second = run(str(tmp_path), plan_seed=2)
+    alone = run(None, plan_seed=2)
+    assert first.games_archived == 0 and second.games_archived == first.games_simulated
+    # Os jogos arquivados não entram no cache: busca e validação saem iguais às de uma execução isolada.
+    assert second.best.report == alone.best.report and second.validation == alone.validation
+    assert second.games_simulated == alone.games_simulated
+    # ...mas a análise das trocas usa os jogos das duas execuções.
+    assert sum(a.games for a in second.swap_analysis) > sum(a.games for a in alone.swap_analysis)
+
+
+# --------------------------------------------------------------------------- #
+# Comparação de sideboards
+# --------------------------------------------------------------------------- #
+
+def test_paired_comparison_uses_differences_between_series(db):
+    report = Bo3Simulator(db, ScriptedEngine({1: True, 2: True, 3: True}), matches_per_opponent=8).evaluate(())
+
+    def candidate(name, wins):
+        return Candidate(name, (), report, {opp.name: wins for opp in db.opponents})
+
+    wins = [True, False, True, True, False, True, False, True]
+    same = paired_comparison(candidate("a", wins), candidate("b", wins))
+    assert same.gain == 0 and same.stderr == 0 and not same.significant
+    # Diferenças por série: uma vitória a mais em 8, igual em todos os oponentes.
+    better = [True, True, True, True, False, True, False, True]
+    c = paired_comparison(candidate("a", better), candidate("b", wins), block=2)
+    shares = np.array([o.meta_share for o in db.opponents]) / sum(o.meta_share for o in db.opponents)
+    sums = np.array([1.0, 0.0, 0.0, 0.0])  # soma das diferenças em cada bloco de 2 séries
+    per_opponent = np.sum((sums - sums.mean()) ** 2) * 4 / 3 / 8 ** 2
+    assert c.stderr == pytest.approx(np.sqrt(np.sum(shares ** 2) * per_opponent))
+    assert np.isnan(paired_comparison(candidate("a", better), candidate("b", wins), block=8).stderr)
+
+
+def test_compare_sideboards_shares_game1_and_exports(db, tmp_path):
+    rng = np.random.default_rng(0)
+    sideboards = {"referencia": load_reference_sideboard(), "aleatorio_1": random_sideboard(db, rng)}
+    assert len(sideboard_from_names(db, sideboards["aleatorio_1"])) == 15
+    with pytest.raises(ValueError):
+        sideboard_from_names(db, ["Lightning Bolt"] * 15)   # fora do pool
+    with pytest.raises(ValueError):
+        sideboard_from_names(db, ["Blood Moon"] * 15)       # cópias demais
+
+    cfg = ExperimentConfig(validation_matches=40, games_dir=str(tmp_path / "jogos"))
+    result = compare_sideboards(cfg, sideboards)
+    assert [c.name for c in result.candidates] == ["referencia", "aleatorio_1", NO_SIDEBOARD]
+    assert len({c.report.winrate_md1 for c in result.candidates}) == 1  # mesmos Games 1
+    assert all(c.report.n_matches == 40 for c in result.candidates)
+    assert [(c.candidate, c.reference) for c in result.comparisons] == [
+        ("referencia", NO_SIDEBOARD), ("aleatorio_1", NO_SIDEBOARD), ("referencia", "aleatorio_1")]
+    for c in result.comparisons:
+        by_name = {x.name: x.report.winrate_bo3 for x in result.candidates}
+        assert c.gain == pytest.approx(by_name[c.candidate] - by_name[c.reference])
+    assert result.swap_analysis and list((tmp_path / "jogos").glob("*.json"))
+
+    data = json.loads(export_comparison_json(result, tmp_path / "c.json").read_text(encoding="utf-8"))
+    assert [c["name"] for c in data["candidates"]] == ["referencia", "aleatorio_1", NO_SIDEBOARD]
+    assert len(data["comparisons"]) == 3 and sum(n for _, n in data["candidates"][0]["cards"]) == 15
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(export_comparison_xlsx(result, tmp_path / "c.xlsx"))
+    assert wb.sheetnames == ["Candidatos", "Comparacoes", "Matchups", "Efeito_Trocas", "Resumo"]
+    assert wb["Matchups"].max_row == 1 + 3 * len(db.opponents)
+
+
+def test_compare_command_reads_the_sideboard_of_a_previous_result(tmp_path, capsys):
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location("tccmagic_main", Path(__file__).resolve().parent.parent / "main.py")
+    main = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(main)
+
+    cfg = ExperimentConfig(matches_per_opponent=10, brkga=BRKGAConfig(population_size=6, generations=1, seed=1))
+    previous = run_experiment(cfg)
+    source = export_json(previous, tmp_path / "resultado.json")
+
+    main.run(main.parse_args(["--compare", str(source), "--validation-matches", "20", "--random-sideboards", "1",
+                              "--out", str(tmp_path / "saida"), "--games-dir", ""]))
+    data = json.loads((tmp_path / "saida" / "comparacao.json").read_text(encoding="utf-8"))
+    assert [c["name"] for c in data["candidates"]] == ["otimizado", "referencia", "aleatorio_1", NO_SIDEBOARD]
+    assert dict(map(tuple, data["candidates"][0]["cards"])) == dict(previous.best.decoded.card_counts())
+    assert data["config"]["games_dir"] is None and data["games_from_archive"] == 0
+    assert "DIFERENÇAS DE WINRATE BO3" in capsys.readouterr().out

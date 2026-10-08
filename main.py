@@ -6,27 +6,35 @@ Uso:
     python main.py --generations 100 --workers 4
     python main.py --engine forge --matches 30 --workers 4
     python main.py --engine forge --game1-check 100 --workers 4   # só mede o Game 1
+    python main.py --engine forge --compare resultados/resultado.json --validation-matches 300 --workers 4
+                                                     # sem busca: compara o sideboard encontrado com outros
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import sys
 from pathlib import Path
 
+import numpy as np
+
 from tccmagic.analysis import SwapEffect, metagame_effects
 from tccmagic.attributes import ATTRIBUTES
 from tccmagic.brkga import BRKGAConfig
-from tccmagic.cards import load_database
-from tccmagic.export import export_json, export_xlsx
+from tccmagic.cards import load_database, load_reference_sideboard
+from tccmagic.export import export_comparison_json, export_comparison_xlsx, export_json, export_xlsx
 from tccmagic.pipeline import (
     VALIDATION_FACTOR,
+    ComparisonResult,
     ExperimentConfig,
     ExperimentResult,
     GenerationRecord,
+    compare_sideboards,
     measure_game1,
+    random_sideboard,
     run_experiment,
 )
 from tccmagic.simulation import ForgeConfig, SurrogateConfig, wilson_interval
@@ -34,6 +42,9 @@ from tccmagic.simulation import ForgeConfig, SurrogateConfig, wilson_interval
 # Instalação local do Forge usada para desenvolvimento/testes neste ambiente.
 DEFAULT_FORGE_DIR = r"C:\Users\Enso\Desktop\Artigo TCC\Forge"
 DEFAULT_FORGE_JAR = str(Path(DEFAULT_FORGE_DIR) / "forge-gui-desktop-2.0.15-jar-with-dependencies.jar")
+
+# Arquivo de jogos pós-side: fixo, e não dentro de --out, para acumular entre execuções.
+DEFAULT_GAMES_DIR = str(Path("resultados") / "jogos")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -52,6 +63,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="reavaliar a população a cada geração, acumulando séries (padrão: ligado no Forge)")
     p.add_argument("--game1-check", type=int, default=None, metavar="N",
                    help="apenas mede o Game 1: joga N jogos do maindeck contra cada oponente e sai")
+    p.add_argument("--compare", default=None, metavar="RESULTADO.json",
+                   help="não faz a busca: valida o sideboard final desse resultado contra o de referência, "
+                        "sideboards sorteados do pool e a linha de base sem sideboard")
+    p.add_argument("--random-sideboards", type=int, default=2, metavar="N",
+                   help="sideboards sorteados do pool incluídos em --compare (semente: --seed)")
+    p.add_argument("--games-dir", default=DEFAULT_GAMES_DIR,
+                   help="pasta do arquivo de jogos pós-side; os jogos de execuções anteriores somam-se à "
+                        "análise das trocas ('' desliga)")
     p.add_argument("--max-swaps", type=int, default=5)
     p.add_argument("--plan", choices=["aleatorio", "afinidade"], default="aleatorio",
                    help="plano de troca nos Games 2/3: sorteado (padrão) ou pela tabela de afinidade")
@@ -131,7 +150,7 @@ def print_summary(result: ExperimentResult) -> None:
     print_swap_analysis(result)
 
 
-def print_swap_analysis(result: ExperimentResult) -> None:
+def print_swap_analysis(result: ExperimentResult | ComparisonResult) -> None:
     """Efeito estimado de cada carta trocada (só no plano aleatório)."""
     if not result.swap_analysis:
         return
@@ -141,7 +160,9 @@ def print_swap_analysis(result: ExperimentResult) -> None:
         mark = " *" if e.significant else ""
         return f"{e.card:<30}{e.effect * 100:+7.1f} pp ± {1.96 * e.stderr * 100:4.1f}  ({e.games} jogos){mark}"
 
-    print(f"\n{line}\nEFEITO DAS TROCAS SORTEADAS (todos os jogos pós-side da busca e da validação)\n{line}")
+    print(f"\n{line}\nEFEITO DAS TROCAS SORTEADAS (todos os jogos pós-side desta execução)\n{line}")
+    if result.games_archived:
+        print(f"  Inclui também {result.games_archived} jogos de execuções anteriores (arquivo de jogos).")
     print("  entra: ganho por cópia ao colocar a carta no lugar de uma flex qualquer do maindeck\n"
           "  sai:   ganho ao tirar a carta em vez de uma flex qualquer (positivo = faz pouca falta)\n"
           "  ± = metade do IC 95%; * = intervalo exclui zero")
@@ -186,6 +207,59 @@ def print_game1_check(config: ExperimentConfig, n_games: int) -> None:
           "  alterar o resultado, e a otimização tende a não encontrar sinal.")
 
 
+def print_comparison(result: ComparisonResult) -> None:
+    line = "=" * 78
+    print(f"\n{line}\nSIDEBOARDS COMPARADOS ({result.n_matches} séries novas por oponente, mesmos Games 1)\n{line}")
+    for c in result.candidates:
+        print(f"  {c.name:<16} {', '.join(f'{n} {card}' for card, n in c.cards) or '—'}")
+    opponents = [m.opponent for m in result.candidates[0].report.matchups]
+    print(f"\n  {'WinRate Bo3':<16}{'Metajogo':>10}{'± erro':>8}" + "".join(f"{o[:13]:>15}" for o in opponents))
+    for c in result.candidates:
+        print(f"  {c.name:<16}{c.report.winrate_bo3:10.3f}{c.report.stderr_bo3:8.3f}"
+              + "".join(f"{m.winrate_bo3:15.3f}" for m in c.report.matchups))
+
+    print(f"\n{line}\nDIFERENÇAS DE WINRATE BO3 (pareadas série a série)\n{line}")
+    print("  * = o intervalo de 95% exclui zero")
+    for c in result.comparisons:
+        low, high = c.interval()
+        print(f"  {c.candidate:<16} − {c.reference:<16}{c.gain * 100:+7.1f} pp  "
+              f"(IC 95%: {low * 100:+.1f} a {high * 100:+.1f}){' *' if c.significant else ''}")
+    total = result.games_simulated + result.games_reused
+    if total:
+        print(f"\n  Jogos pós-side: {result.games_simulated} simulados, {result.games_reused} reaproveitados "
+              f"do cache ({result.games_reused / total:.0%})  |  tempo total: {result.elapsed_seconds:.1f}s")
+    print_swap_analysis(result)
+
+
+def run_comparison(config: ExperimentConfig, args: argparse.Namespace) -> None:
+    with open(args.compare, encoding="utf-8") as fh:
+        optimized = [entry["card"] for entry in json.load(fh)["final"]["sideboard"]]
+    sideboards = {"otimizado": optimized, "referencia": load_reference_sideboard()}
+    database = load_database()
+    rng = np.random.default_rng(args.seed)
+    for k in range(1, args.random_sideboards + 1):
+        sideboards[f"aleatorio_{k}"] = random_sideboard(database, rng)
+
+    print(f"Comparação de sideboards | motor={config.engine} | séries/oponente={config.n_validation_matches} "
+          f"| plano={config.plan} | workers={config.workers}\n")
+    result = compare_sideboards(config, sideboards, status=print)
+    print_comparison(result)
+    out = Path(args.out)
+    json_path = export_comparison_json(result, out / "comparacao.json")
+    xlsx_path = export_comparison_xlsx(result, out / "comparacao.xlsx")
+    print(f"\nArquivos exportados:\n  {json_path}\n  {xlsx_path}")
+
+
+def save_partial(result: ExperimentResult, path: Path) -> None:
+    """Grava o resultado da busca antes da validação final (que pode falhar)."""
+    try:
+        export_json(result, path)
+    except OSError as exc:
+        print(f"Aviso: não foi possível gravar o resultado parcial da busca ({exc}).")
+    else:
+        print(f"Busca concluída; resultado parcial gravado em {path}")
+
+
 def run(args: argparse.Namespace) -> None:
     forge_config = None
     if args.engine == "forge":
@@ -204,6 +278,7 @@ def run(args: argparse.Namespace) -> None:
         plan_seed=args.plan_seed,
         copy_penalty=args.copy_penalty,
         workers=args.workers,
+        games_dir=args.games_dir or None,
         brkga=BRKGAConfig(
             population_size=args.population,
             elite_fraction=args.elite,
@@ -220,6 +295,9 @@ def run(args: argparse.Namespace) -> None:
     if args.game1_check:
         print_game1_check(config, args.game1_check)
         return
+    if args.compare:
+        run_comparison(config, args)
+        return
 
     print(f"BRKGA-A | motor={config.engine} | população={args.population} | gerações={args.generations} "
           f"| séries/oponente={args.matches} | validação={config.n_validation_matches} "
@@ -231,12 +309,15 @@ def run(args: argparse.Namespace) -> None:
             print("Diferenças entre sideboards menores que isso só aparecem com as séries acumuladas pela "
                   "reamostragem dos elites.")
     print()
-    result = run_experiment(config, progress=print_generation, status=print)
+    out = Path(args.out)
+    partial_path = out / "resultado_parcial.json"
+    result = run_experiment(config, progress=print_generation, status=print,
+                            on_search_done=lambda partial: save_partial(partial, partial_path))
     print_summary(result)
 
-    out = Path(args.out)
     json_path = export_json(result, out / "resultado.json")
     xlsx_path = export_xlsx(result, out / "resultado.xlsx")
+    partial_path.unlink(missing_ok=True)  # substituído pelo resultado completo
     print(f"\nArquivos exportados:\n  {json_path}\n  {xlsx_path}")
 
 
@@ -331,7 +412,7 @@ def ask_forge(args: argparse.Namespace) -> None:
         "todos os sideboards da população, acumulando as séries dos que sobrevivem)",
         args.generations, int, 1)
     args.workers = ask(
-        f"Workers (quantas instâncias do Forge rodam em paralelo; cada uma usa até 4 GB de RAM; "
+        f"Workers (quantas instâncias do Forge rodam em paralelo; cada uma usa ~1,5 GB de RAM; "
         f"esta máquina tem {cpus} núcleos)",
         args.workers, int, 1, cpus)
     ask_plan(args)
@@ -395,6 +476,17 @@ def estimate_forge_hours(args: argparse.Namespace, n_opponents: int) -> float:
     return (search + validation) / args.workers / 3600
 
 
+def estimate_comparison_hours(args: argparse.Namespace, n_opponents: int) -> float:
+    """Estimativa grosseira de --compare (limite superior: ignora jogos compartilhados pelo cache)."""
+    n = args.validation_matches
+    blocks = math.ceil(n / args.plan_block) if args.plan == "aleatorio" else 1
+    game1 = n_opponents * (FORGE_STARTUP_SECONDS + n * FORGE_GAME_SECONDS)
+    # G2 + G3 nas séries empatadas (~40%); a linha de base usa um único deck por oponente.
+    with_side = n_opponents * (2 * blocks * FORGE_STARTUP_SECONDS + 1.4 * n * FORGE_GAME_SECONDS)
+    baseline = n_opponents * (2 * FORGE_STARTUP_SECONDS + 1.4 * n * FORGE_GAME_SECONDS)
+    return (game1 + (2 + args.random_sideboards) * with_side + baseline) / args.workers / 3600
+
+
 def show_data() -> None:
     db = load_database()
     print(f"\nMaindeck: {db.maindeck.name}")
@@ -420,6 +512,7 @@ def menu() -> argparse.Namespace | None:
         print("  3. Teste rápido do Forge (só verifica a integração: ~15–25 min)")
         print("  4. Ver dados carregados (maindeck, pool de sideboard, oponentes)")
         print("  5. Medir o Game 1 no Forge (maindeck vs. cada oponente, antes de otimizar)")
+        print("  6. Comparar sideboards no Forge (o de um resultado vs. referência, aleatórios e sem side)")
         print("  0. Sair")
         choice = input("\nEscolha uma opção: ").strip()
 
@@ -432,10 +525,32 @@ def menu() -> argparse.Namespace | None:
         if choice == "1":
             print("\nSimulador substituto — Enter mantém o valor entre colchetes.\n")
             ask_surrogate(args)
-        elif choice in ("2", "3", "5"):
+        elif choice in ("2", "3", "5", "6"):
             args.engine = "forge"
             if not Path(args.forge_jar).is_file():
                 print(f"\nJAR do Forge não encontrado: {args.forge_jar}")
+                continue
+            if choice == "6":
+                cpus = os.cpu_count() or 1
+                print("\nComparação de sideboards — Enter mantém o valor entre colchetes.\n")
+                args.compare = ask("Resultado com o sideboard a comparar",
+                                   str(Path("resultados") / "resultado.json"))
+                if not Path(args.compare).is_file():
+                    print(f"\nArquivo não encontrado: {args.compare}")
+                    continue
+                args.validation_matches = ask(
+                    "Séries novas por oponente (cada sideboard e a linha de base jogam esta quantidade)",
+                    300, int, 1)
+                args.random_sideboards = ask("Sideboards sorteados do pool incluídos na comparação",
+                                             args.random_sideboards, int, 0)
+                args.workers = ask(f"Workers (instâncias do Forge em paralelo; esta máquina tem {cpus} núcleos)",
+                                   min(4, cpus), int, 1, cpus)
+                args.out = ask("Pasta de saída (comparacao.json e comparacao.xlsx)", "resultados_comparacao")
+                hours = estimate_comparison_hours(args, len(load_database().opponents))
+                print(f"\nTempo estimado: até ~{hours:.1f} h (aproximado; sideboards parecidos compartilham "
+                      "jogos pelo cache).\n")
+                if ask_yes_no("Iniciar a comparação?", True):
+                    return args
                 continue
             if choice == "5":
                 cpus = os.cpu_count() or 1

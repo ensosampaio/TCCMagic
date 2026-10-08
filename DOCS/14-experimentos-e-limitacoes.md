@@ -126,8 +126,9 @@ distintos** somando os oponentes (Esper Blink: só 10). Isso motivou o
    Moon e Voice of Victory contra Zoo, e Wear // Tear e Wrath contra Bogles.
 2. **Plano aprendido:** usar a tabela de efeitos como plano de troca (entram as cartas de maior β
    e saem as de maior −γ) e validar contra a linha de base e contra o plano por afinidade.
-3. **Validar o sideboard de referência** da lista original (anotado no `_comment` do maindeck),
-   para responder se o otimizador supera o sideboard humano.
+3. **Validar o sideboard de referência** da lista original, para responder se o otimizador supera
+   o sideboard humano. Implementado: `python main.py --compare`
+   ([10](10-validacao-e-analise-de-trocas.md#comparação-de-sideboards)); falta rodar no Forge.
 4. **Gastar simulações onde importa:** técnicas de *racing* ou OCBA, para concentrar séries nos
    candidatos próximos do topo.
 5. **Ampliar o metajogo** com decks de cemitério e combo, para que cartas como Rest in Peace e

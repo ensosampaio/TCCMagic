@@ -30,6 +30,7 @@ python main.py
 | 3 | Teste rápido do Forge: 2 séries, população 4, 1 geração, saída em `resultados_teste`. Serve só para verificar a integração |
 | 4 | Mostra os dados carregados (maindeck, pool, oponentes) |
 | 5 | Mede só o Game 1 no Forge (maindeck vs. cada oponente), com IC de 95% |
+| 6 | Compara sideboards no Forge, sem busca: o sideboard de um `resultado.json` contra o de referência, sideboards sorteados e a linha de base. Ver [10](10-validacao-e-analise-de-trocas.md#comparação-de-sideboards) |
 | 0 | Sair |
 
 Antes de iniciar uma execução com o Forge, o menu mostra uma **estimativa de tempo** (limite
@@ -44,6 +45,8 @@ python main.py --engine surrogate --generations 100 --workers 4
 python main.py --engine forge --matches 30 --population 16 --generations 8 --workers 4
 python main.py --engine forge --game1-check 100 --workers 4     # só mede o Game 1
 python main.py --engine forge --plan afinidade                  # plano de troca antigo
+python main.py --engine forge --compare resultados/resultado.json --validation-matches 300 --workers 4
+                                                                # sem busca: compara sideboards
 ```
 
 ## Todas as opções
@@ -55,8 +58,9 @@ python main.py --engine forge --plan afinidade                  # plano de troca
 | `--engine {surrogate,forge}` | `surrogate` | Motor de partidas |
 | `--forge-jar CAMINHO` | variável `FORGE_JAR` ou a instalação local | JAR do Forge (`forge-gui-desktop-*-jar-with-dependencies.jar`) |
 | `--forge-dir CAMINHO` | variável `FORGE_DIR` ou a instalação local | Diretório de instalação do Forge (usado como `cwd`) |
-| `--workers N` | 1 | Processos paralelos. Com o Forge, cada um usa até 4 GB de RAM |
-| `--out PASTA` | `resultados` | Onde gravar `resultado.json` e `resultado.xlsx` |
+| `--workers N` | 1 | Processos paralelos. Com o Forge, cada um usa ~1,5 GB de RAM |
+| `--out PASTA` | `resultados` | Onde gravar `resultado.json` e `resultado.xlsx` (ou `comparacao.*` com `--compare`). Uma execução nova **sobrescreve** os arquivos da pasta |
+| `--games-dir PASTA` | `resultados/jogos` | Arquivo de jogos pós-side, somado à análise das trocas entre execuções. `''` desliga. Ver [10](10-validacao-e-analise-de-trocas.md#arquivo-de-jogos) |
 
 ### BRKGA
 
@@ -79,6 +83,8 @@ python main.py --engine forge --plan afinidade                  # plano de troca
 | `--validation-matches N` | 5 × `--matches` | Séries novas por oponente na validação final |
 | `--resample` / `--no-resample` | automático | Reavalia a população a cada geração, acumulando séries. Automático = ligado no Forge, desligado no substituto |
 | `--game1-check N` | — | Joga N Games 1 contra cada oponente, mostra as taxas com IC de 95% e sai |
+| `--compare RESULTADO.json` | — | Não faz a busca: valida o sideboard final desse resultado contra o de referência, sideboards sorteados e a linha de base. Usa `--validation-matches` séries por oponente |
+| `--random-sideboards N` | 2 | Sideboards sorteados do pool incluídos em `--compare` (semente: `--seed`) |
 | `--sim-seed N` | 12345 | Semente do simulador substituto |
 
 ### Plano de troca (Games 2/3)

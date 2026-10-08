@@ -39,6 +39,67 @@ ruidosas, então quem fica no topo tende a ser quem teve sorte (maldição do ve
 No plano aleatório, a validação mede o sideboard **com trocas sorteadas**, ou seja, quanto ele
 rende quando as trocas são feitas às cegas.
 
+## Comparação de sideboards
+
+Módulo: `tccmagic/pipeline.py` (`compare_sideboards`). Comando: `python main.py --compare
+RESULTADO.json` (ou opção 6 do menu).
+
+A validação final responde "este sideboard é melhor que nenhum?". Ela não responde "a busca achou
+um sideboard melhor que os outros?". Para isso, a comparação joga, **sem refazer a busca** e sobre
+os mesmos Games 1:
+
+| Candidato | Origem |
+|---|---|
+| `otimizado` | `final.sideboard` do `resultado.json` informado |
+| `referencia` | `tccmagic/data/sideboard_referencia.json` (a lista humana) |
+| `aleatorio_1`, `aleatorio_2`, ... | 15 entradas sorteadas do pool (`--random-sideboards`, semente `--seed`) |
+| `sem_sideboard` | Linha de base: Games 2/3 com o maindeck |
+
+São reportadas as diferenças de WinRate_Bo3 de cada sideboard para a linha de base e do `otimizado`
+para cada um dos outros.
+
+### Erro pareado
+
+A série `m` de todos os candidatos parte do mesmo Game 1 e, no plano aleatório, do mesmo sorteio
+de trocas. Quando dois sideboards geram o mesmo deck pós-side, os jogos são os mesmos (cache). Por
+isso a diferença entre dois candidatos é estimada **série a série** (`paired_comparison`):
+
+```
+d_m = venceu_A(m) − venceu_B(m)        ganho = Σ_opp (share/Σshare) · média(d)
+```
+
+As séries de um mesmo bloco de `plan_block` compartilham o plano e não são independentes. A
+variância é calculada entre blocos (erro padrão por conglomerados), e não entre séries:
+
+```
+S_g = soma de d no bloco g        var(média) = G/(G−1) · Σ_g (S_g − S̄)² / n²
+```
+
+Esse erro é menor que o `gain_stderr` da validação final, que trata as duas amostras como
+independentes. Quanto ele cai no Forge depende de quantos decks pós-side os dois sideboards têm em
+comum, e só a própria execução mostra. Se o intervalo de `otimizado − referencia` incluir zero, a
+conclusão é que os dois são equivalentes dentro dessa precisão.
+
+Saídas: `comparacao.json` e `comparacao.xlsx` ([11](11-saidas-json-xlsx.md#comparacaojson)).
+
+## Arquivo de jogos
+
+Módulo: `tccmagic/archive.py`. Opção: `--games-dir` (padrão `resultados/jogos`).
+
+Cada execução (busca ou comparação) grava os seus jogos pós-side em
+`<pasta>/<data-hora>.json`. As execuções seguintes somam esses jogos aos próprios na análise das
+trocas, de modo que a amostra cresce de uma rodada para a outra.
+
+- **Só a análise usa o arquivo.** Os jogos antigos nunca entram no cache do simulador: a busca e a
+  validação jogam tudo de novo e saem idênticas às de uma execução sem arquivo.
+- **Mesmo contexto.** Só entram jogos com o mesmo motor (para o Forge, o mesmo JAR), o mesmo
+  maindeck e as mesmas listas de oponentes. Execuções de outro contexto são ignoradas, e o
+  programa avisa quantas.
+- **Gravação em dois momentos:** ao fim da busca e ao fim da validação (mesmo que ela falhe).
+- **Mais variedade de trocas:** execuções com a mesma `--plan-seed` repetem os mesmos sorteios nas
+  mesmas séries. Para a análise, mude `--plan-seed` de uma execução para a outra.
+- Para descartar o histórico, apague a pasta. Para não usar, passe `--games-dir ''`.
+
 ## Análise das trocas sorteadas
 
 Módulo: `tccmagic/analysis.py`. Só roda no plano `aleatorio`. No plano por afinidade, as trocas
@@ -48,7 +109,8 @@ não variam aleatoriamente e os efeitos não podem ser separados.
 
 Todos os jogos pós-side de `Bo3Simulator.games` (busca e validação, incluindo a linha de base sem
 trocas), **cada jogo contado uma única vez**, mesmo que tenha sido reaproveitado por vários
-sideboards.
+sideboards. Com o [arquivo de jogos](#arquivo-de-jogos) ligado, entram também os jogos das
+execuções anteriores do mesmo contexto.
 
 Como as trocas são sorteadas, não há um jogador escolhendo as cartas "certas" para cada confronto.
 A associação entre trocar uma carta e vencer pode então ser lida como **efeito causal**.

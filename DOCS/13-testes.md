@@ -91,6 +91,16 @@ reais:
 | `test_experiment_validates_best_and_baseline_on_fresh_series` | Validação com séries novas, mesmos G1 para os dois candidatos, linha de base sem trocas, IC consistente |
 | `test_measure_game1_reports_wins_per_opponent` | Diagnóstico do Game 1 devolve vitórias por oponente |
 
+### Arquivo de jogos e comparação de sideboards
+
+| Teste | Garante que |
+|---|---|
+| `test_game_archive_round_trip_and_context` | Os jogos gravados voltam iguais, a execução atual não se lê a si mesma, outro contexto é ignorado, e só o motor determinístico deduplica chaves |
+| `test_archived_games_feed_the_swap_analysis_but_not_the_results` | Com o arquivo ligado, busca e validação saem idênticas às de uma execução isolada, e a análise das trocas ganha jogos |
+| `test_paired_comparison_uses_differences_between_series` | Candidatos iguais dão ganho e erro zero; o erro por blocos confere com a conta feita à mão |
+| `test_compare_sideboards_shares_game1_and_exports` | Mesmos G1 para todos, linha de base por último, pares comparados corretos, sideboards ilegais rejeitados, JSON e XLSX exportados |
+| `test_compare_command_reads_the_sideboard_of_a_previous_result` | `main.py --compare` lê o sideboard de um `resultado.json` e grava `comparacao.json` |
+
 ## Escrevendo testes novos
 
 - Use a fixture `db` (`load_database()`, escopo de módulo).

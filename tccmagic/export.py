@@ -8,7 +8,7 @@ from pathlib import Path
 
 from tccmagic.analysis import SwapEffect, metagame_effects
 from tccmagic.attributes import ATTRIBUTES
-from tccmagic.pipeline import ExperimentResult
+from tccmagic.pipeline import ComparisonResult, ExperimentResult
 from tccmagic.simulation import EvaluationReport
 
 
@@ -34,8 +34,10 @@ def _report_dict(report: EvaluationReport) -> dict:
     }
 
 
-def _validation_dict(result: ExperimentResult) -> dict:
+def _validation_dict(result: ExperimentResult) -> dict | None:
     validation = result.validation
+    if validation is None:  # resultado parcial: a validação ainda não foi jogada
+        return None
     low, high = validation.gain_interval()
     return {
         "n_matches": validation.n_matches,
@@ -54,7 +56,7 @@ def _effect_dict(e: SwapEffect) -> dict:
             "stderr": e.stderr, "ci95": [low, high], "significant": e.significant}
 
 
-def _swap_analysis_dict(result: ExperimentResult) -> dict:
+def _swap_analysis_dict(result: ExperimentResult | ComparisonResult) -> dict:
     return {
         "method": "probabilidade linear por oponente; entra = ganho por cópia no lugar de uma flex média; "
                   "sai = ganho de tirar a carta em vez de uma flex média",
@@ -78,6 +80,7 @@ def result_to_dict(result: ExperimentResult) -> dict:
         "resampled": result.resampled,
         "games_simulated": result.games_simulated,
         "games_reused": result.games_reused,
+        "games_from_archive": result.games_archived,
         "final": {
             "fitness": best.fitness,
             "keys": dict(zip(ATTRIBUTES, result.best_keys)),
@@ -102,17 +105,33 @@ def export_json(result: ExperimentResult, path: str | Path) -> Path:
     return path
 
 
-def export_xlsx(result: ExperimentResult, path: str | Path) -> Path:
+MATCHUP_HEADER = ["oponente", "arquetipo", "meta_share", "series", "winrate_md1", "winrate_bo3",
+                  "winrate_pos_side", "delta_winrate", "entram (copias por serie)", "saem (copias por serie)"]
+EFFECT_HEADER = ["oponente", "carta", "papel", "jogos", "winrate_bruta", "efeito_por_copia", "erro_padrao",
+                 "ic95_inferior", "ic95_superior", "significativo"]
+
+
+def _matchup_row(m) -> list:
+    return [m.opponent, m.archetype, m.meta_share, m.n_matches, m.winrate_md1, m.winrate_bo3,
+            m.winrate_postboard, m.delta_winrate, m.cards_in, m.cards_out]
+
+
+def _effect_rows(result: ExperimentResult | ComparisonResult) -> list[list]:
+    effects = [*(e for a in result.swap_analysis for e in (*a.role("entra"), *a.role("sai"))),
+               *metagame_effects(result.swap_analysis)]
+    return [[e.opponent, e.card, e.role, e.games, e.winrate, e.effect, e.stderr, *e.ci95, e.significant]
+            for e in effects]
+
+
+def _workbook():
+    """Planilha nova e a função que acrescenta uma aba com cabeçalho em negrito."""
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Font
     except ImportError as exc:  # pragma: no cover - depende do ambiente
         raise ImportError("Exportação .xlsx requer 'openpyxl' (pip install openpyxl).") from exc
 
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     wb = Workbook()
-    best = result.best
 
     def sheet(title: str, header: list[str], rows: list[list], first: bool = False):
         ws = wb.active if first else wb.create_sheet()
@@ -126,6 +145,17 @@ def export_xlsx(result: ExperimentResult, path: str | Path) -> Path:
             width = max(len(str(c.value)) if c.value is not None else 0 for c in column)
             ws.column_dimensions[column[0].column_letter].width = min(60, width + 2)
         return ws
+
+    return wb, sheet
+
+
+def export_xlsx(result: ExperimentResult, path: str | Path) -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if result.validation is None:
+        raise ValueError("Resultado parcial (sem validação): exporte com export_json.")
+    wb, sheet = _workbook()
+    best = result.best
 
     sheet(
         "Geracoes",
@@ -148,32 +178,16 @@ def export_xlsx(result: ExperimentResult, path: str | Path) -> Path:
         [[i, s.card.name, s.copy_index, sc]
          for i, (s, sc) in enumerate(zip(best.decoded.slots, best.decoded.scores), start=1)],
     )
-    matchup_header = ["oponente", "arquetipo", "meta_share", "series", "winrate_md1", "winrate_bo3",
-                      "winrate_pos_side", "delta_winrate", "entram (copias por serie)", "saem (copias por serie)"]
-    sheet(
-        "Matchups",
-        matchup_header,
-        [[m.opponent, m.archetype, m.meta_share, m.n_matches, m.winrate_md1, m.winrate_bo3,
-          m.winrate_postboard, m.delta_winrate, m.cards_in, m.cards_out] for m in best.report.matchups],
-    )
+    sheet("Matchups", MATCHUP_HEADER, [_matchup_row(m) for m in best.report.matchups])
     validation = result.validation
     sheet(
         "Validacao",
-        ["deck", *matchup_header],
-        [[label, m.opponent, m.archetype, m.meta_share, m.n_matches, m.winrate_md1, m.winrate_bo3,
-          m.winrate_postboard, m.delta_winrate, m.cards_in, m.cards_out]
+        ["deck", *MATCHUP_HEADER],
+        [[label, *_matchup_row(m)]
          for label, report in (("com_sideboard", validation.sideboard), ("sem_sideboard", validation.baseline))
          for m in report.matchups],
     )
-    effects = [*(e for a in result.swap_analysis for e in (*a.role("entra"), *a.role("sai"))),
-               *metagame_effects(result.swap_analysis)]
-    sheet(
-        "Efeito_Trocas",
-        ["oponente", "carta", "papel", "jogos", "winrate_bruta", "efeito_por_copia", "erro_padrao",
-         "ic95_inferior", "ic95_superior", "significativo"],
-        [[e.opponent, e.card, e.role, e.games, e.winrate, e.effect, e.stderr, *e.ci95, e.significant]
-         for e in effects],
-    )
+    sheet("Efeito_Trocas", EFFECT_HEADER, _effect_rows(result))
     low, high = validation.gain_interval()
     sheet(
         "Resumo",
@@ -184,6 +198,7 @@ def export_xlsx(result: ExperimentResult, path: str | Path) -> Path:
             ["plano_de_troca", result.config.plan],
             ["jogos_pos_side_simulados", result.games_simulated],
             ["jogos_pos_side_reaproveitados_do_cache", result.games_reused],
+            ["jogos_de_execucoes_anteriores_na_analise_de_trocas", result.games_archived],
             ["geracoes_executadas", len(result.history) - 1],
             ["fitness_final_na_busca (winrate_bo3, otimista)", best.fitness],
             ["series_por_oponente_na_busca", best.report.n_matches],
@@ -197,6 +212,83 @@ def export_xlsx(result: ExperimentResult, path: str | Path) -> Path:
             ["ganho_ic95_inferior", low],
             ["ganho_ic95_superior", high],
             ["ganho_significativo (ic95 exclui zero)", validation.significant],
+            ["tempo_total_s", result.elapsed_seconds],
+        ],
+    )
+    wb.save(path)
+    return path
+
+
+# --------------------------------------------------------------------------- #
+# Comparação de sideboards (python main.py --compare ...)
+# --------------------------------------------------------------------------- #
+
+def comparison_to_dict(result: ComparisonResult) -> dict:
+    return {
+        "config": result.config_dict(),
+        "maindeck": result.database.maindeck.name,
+        "elapsed_seconds": result.elapsed_seconds,
+        "n_matches": result.n_matches,
+        "games_simulated": result.games_simulated,
+        "games_reused": result.games_reused,
+        "games_from_archive": result.games_archived,
+        "candidates": [
+            {"name": c.name, "cards": [list(pair) for pair in c.cards],
+             **_report_dict(c.report), "stderr_bo3": c.report.stderr_bo3}
+            for c in result.candidates
+        ],
+        "comparisons": [
+            {"candidate": c.candidate, "reference": c.reference, "gain": c.gain, "stderr": c.stderr,
+             "ci95": list(c.interval()), "significant": c.significant}
+            for c in result.comparisons
+        ],
+        "swap_analysis": _swap_analysis_dict(result),
+    }
+
+
+def export_comparison_json(result: ComparisonResult, path: str | Path) -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(comparison_to_dict(result), fh, ensure_ascii=False, indent=2)
+    return path
+
+
+def export_comparison_xlsx(result: ComparisonResult, path: str | Path) -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb, sheet = _workbook()
+    sheet(
+        "Candidatos",
+        ["sideboard", "cartas", "series", "winrate_md1", "winrate_bo3", "erro_padrao_bo3", "winrate_pos_side"],
+        [[c.name, ", ".join(f"{n} {card}" for card, n in c.cards) or "—", c.report.n_matches,
+          c.report.winrate_md1, c.report.winrate_bo3, c.report.stderr_bo3, c.report.winrate_postboard]
+         for c in result.candidates],
+        first=True,
+    )
+    sheet(
+        "Comparacoes",
+        ["sideboard", "comparado_com", "ganho_bo3", "erro_padrao_pareado", "ic95_inferior", "ic95_superior",
+         "significativo"],
+        [[c.candidate, c.reference, c.gain, c.stderr, *c.interval(), c.significant] for c in result.comparisons],
+    )
+    sheet(
+        "Matchups",
+        ["sideboard", *MATCHUP_HEADER],
+        [[c.name, *_matchup_row(m)] for c in result.candidates for m in c.report.matchups],
+    )
+    sheet("Efeito_Trocas", EFFECT_HEADER, _effect_rows(result))
+    sheet(
+        "Resumo",
+        ["metrica", "valor"],
+        [
+            ["maindeck", result.database.maindeck.name],
+            ["motor", result.config.engine],
+            ["plano_de_troca", result.config.plan],
+            ["series_por_oponente", result.n_matches],
+            ["jogos_pos_side_simulados", result.games_simulated],
+            ["jogos_pos_side_reaproveitados_do_cache", result.games_reused],
+            ["jogos_de_execucoes_anteriores_na_analise_de_trocas", result.games_archived],
             ["tempo_total_s", result.elapsed_seconds],
         ],
     )

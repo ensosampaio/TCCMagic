@@ -210,6 +210,7 @@ Atributos: `cache`, `rounds`, `simulations`.
 | `plan_seed` | 2024 | Semente dos sorteios |
 | `copy_penalty` | 1,0 | δ do decodificador |
 | `workers` | 1 | Processos |
+| `games_dir` | `None` | Pasta do arquivo de jogos (`None` = desligado; a CLI usa `resultados/jogos`) |
 | `data_dir`, `maindeck_file` | `tccmagic/data`, `maindeck_boros_energy.json` | Dados |
 | `brkga` | `BRKGAConfig()` | — |
 | `surrogate` | `SurrogateConfig()` | — |
@@ -226,6 +227,30 @@ Atributos: `cache`, `rounds`, `simulations`.
 | `measure_game1(config, n_games) -> list[(Opponent, vitórias)]` | Diagnóstico do Game 1 |
 | `run_experiment(config, progress=None, status=None) -> ExperimentResult` | Experimento completo. `progress` recebe cada `GenerationRecord`, e `status` recebe mensagens de texto |
 | `VALIDATION_FACTOR = 5` | Multiplicador padrão das séries de validação |
+| `compare_sideboards(config, sideboards, status=None) -> ComparisonResult` | Valida vários sideboards (`nome -> cartas`, uma por cópia) e a linha de base sobre os mesmos Games 1, sem busca |
+| `ComparisonResult` | `config`, `database`, `n_matches`, `candidates`, `comparisons`, `swap_analysis`, `games_simulated`, `games_reused`, `games_archived`, `elapsed_seconds` |
+| `Candidate` (imutável) | `name`, `cards`, `report`, `series_wins` (oponente → resultado de cada série) |
+| `Comparison` (imutável) | `candidate`, `reference`, `gain`, `stderr`, mais `interval()` e `significant` |
+| `paired_comparison(candidate, reference, block=1) -> Comparison` | Diferença pareada série a série, com erro por blocos de `block` séries |
+| `sideboard_from_names(database, names)` | Nomes → cartas do pool; rejeita carta fora do pool, tamanho ≠ 15 e cópias em excesso |
+| `random_sideboard(database, rng)` | 15 entradas sorteadas do pool |
+| `NO_SIDEBOARD = "sem_sideboard"` | Nome da linha de base na comparação |
+
+`ExperimentResult` tem também `games_archived` (jogos de execuções anteriores usados na análise).
+
+## `archive.py`
+
+| Símbolo | Descrição |
+|---|---|
+| `context_fingerprint(database, engine) -> str` | Identifica motor, maindeck e listas dos oponentes |
+| `GameArchive(directory, context, engine="")` | Lê os jogos das execuções anteriores do mesmo contexto (`previous`, `skipped_runs`) e reserva o arquivo desta execução (`path`) |
+| `GameArchive.save(games)` | Grava (ou regrava) os jogos desta execução |
+| `GameArchive.merged(games, deterministic)` | Jogos anteriores + atuais; num motor determinístico, a mesma chave conta uma vez |
+
+Em `fitness.py`, `FitnessEvaluator.validate_detailed(sideboards, n)` devolve os relatórios e o
+resultado de cada série; em `simulation/bo3.py`, `Bo3Simulator.play_postboard_detailed` faz o
+mesmo para `play_postboard`. Em `cards.py`, `load_reference_sideboard()` lê o sideboard de
+referência. Em `export.py`, `export_comparison_json` e `export_comparison_xlsx` gravam a comparação.
 
 ## `export.py`
 
