@@ -8,6 +8,7 @@ a causa, antes de qualquer simulação.
 |---|---|
 | `maindeck_boros_energy.json` | Maindeck fixo de 60 cartas, com atributos e marcação `flex` |
 | `sideboard_pool.json` | Cartas candidatas ao sideboard e o máximo de cópias de cada |
+| `sideboard_referencia.json` | Sideboard da lista original (`cards`: carta → cópias, 15 no total, todas do pool). Não entra na busca: é um dos candidatos de `--compare` |
 | `opponents.json` | Suíte de oponentes: arquétipo, participação, decklist e parâmetros do substituto |
 | `archetypes.json` | Tabela de afinidade arquétipo × atributo (usada só no plano `afinidade`) |
 

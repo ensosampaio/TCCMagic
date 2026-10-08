@@ -171,6 +171,8 @@ GameKey = tuple[str, tuple[tuple[str, ...], tuple[str, ...]], int, int, bool]
 # Lote de jogos para o motor: (índice do oponente, deck, jogos).
 Batch = tuple[int, Deck, list[GameSpec]]
 BatchRunner = Callable[[list[Batch]], list[list[bool]]]
+# Resultado de cada série de um sideboard: oponente -> [venceu a série m?].
+SeriesWins = dict[str, list[bool]]
 
 
 @lru_cache(maxsize=1 << 16)
@@ -317,6 +319,19 @@ class Bo3Simulator:
         depois todos os G3), para que um deck repetido entre sideboards seja
         simulado uma única vez.
         """
+        return self.play_postboard_detailed(jobs, game1, runner)[0]
+
+    def play_postboard_detailed(
+        self,
+        jobs: Sequence[tuple[Sequence[Card], int]],
+        game1: dict[str, list[bool]],
+        runner: BatchRunner | None = None,
+    ) -> tuple[list[EvaluationReport], list[SeriesWins]]:
+        """Como ``play_postboard``, mais o resultado de cada série (por sideboard e oponente).
+
+        O resultado série a série permite comparar dois sideboards de forma
+        pareada: a série ``m`` de todos eles parte do mesmo Game 1.
+        """
         runner = runner or self.run_batches
         opponents = self.db.opponents
         # (sideboard j, oponente i, série local m, índice global da série, plano)
@@ -345,22 +360,26 @@ class Bo3Simulator:
             grouped.setdefault((j, i), []).append(s)
 
         reports = []
+        wins: list[SeriesWins] = []
         for j in range(len(jobs)):
             matchups = []
+            wins.append({})
             for i, opp in enumerate(opponents):
                 rows = grouped[(j, i)]
                 plans = [series[s][4] for s in rows]
+                won = [(g1[s] and g2[s]) or g3.get(s, False) for s in rows]
+                wins[j][opp.name] = won
                 matchups.append(MatchupReport(
                     opponent=opp.name,
                     archetype=opp.archetype,
                     meta_share=opp.meta_share,
                     n_matches=len(rows),
                     game1_wins=sum(g1[s] for s in rows),
-                    match_wins=sum(1 for s in rows if (g1[s] and g2[s]) or g3.get(s, False)),
+                    match_wins=sum(won),
                     postboard_games=len(rows) + sum(1 for s in rows if s in g3),
                     postboard_wins=sum(g2[s] for s in rows) + sum(g3.get(s, False) for s in rows),
                     swaps_in=_add_swaps((), tuple(Counter(c.name for p in plans for c in p.cards_in).items())),
                     swaps_out=_add_swaps((), tuple(Counter(c.name for p in plans for c in p.cards_out).items())),
                 ))
             reports.append(EvaluationReport(tuple(matchups)))
-        return reports
+        return reports, wins

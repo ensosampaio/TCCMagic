@@ -32,7 +32,7 @@ import numpy as np
 
 from tccmagic.cards import Card
 from tccmagic.decoder import DecodedSideboard, SideboardDecoder
-from tccmagic.simulation.bo3 import Batch, Bo3Simulator, EvaluationReport
+from tccmagic.simulation.bo3 import Batch, Bo3Simulator, EvaluationReport, SeriesWins
 
 # Índice inicial das séries de validação: longe das séries usadas na busca, para
 # que motores com sorteios fixados por índice (substituto) gerem jogos novos.
@@ -155,8 +155,14 @@ class FitnessEvaluator:
         separa o ganho do sideboard do efeito puramente estatístico do formato
         melhor-de-3 (que amplifica taxas ≠ 50%).
         """
+        return self.validate_detailed(sideboards, n_matches)[0]
+
+    def validate_detailed(self, sideboards: Sequence[Sequence[Card]],
+                          n_matches: int) -> tuple[list[EvaluationReport], list[SeriesWins]]:
+        """Como ``validate``, mais o resultado de cada série, para comparações pareadas."""
         game1 = self.play_game1(n_matches, VALIDATION_MATCH_OFFSET)
-        return self._play([(tuple(sb), VALIDATION_MATCH_OFFSET) for sb in sideboards], game1)
+        jobs = [(tuple(sb), VALIDATION_MATCH_OFFSET) for sb in sideboards]
+        return self.simulator.play_postboard_detailed(jobs, game1, self._run_batches)
 
     def close(self) -> None:
         if self._pool is not None:

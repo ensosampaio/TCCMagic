@@ -252,6 +252,12 @@ def load_archetypes(path: Path) -> dict[str, tuple[float, ...]]:
     return {name: tuple(vector_from_mapping(vec)) for name, vec in raw["affinity"].items()}
 
 
+def load_reference_sideboard(data_dir: Path = DATA_DIR, file: str = "sideboard_referencia.json") -> list[str]:
+    """Sideboard de referência da lista original, como nomes de carta (um por cópia)."""
+    raw = _read_json(data_dir / file)
+    return [name for name, count in raw["cards"].items() for _ in range(int(count))]
+
+
 def load_database(data_dir: Path = DATA_DIR, maindeck_file: str = "maindeck_boros_energy.json") -> Database:
     maindeck = load_maindeck(data_dir / maindeck_file)
     candidates, max_copies = load_card_pool(data_dir / "sideboard_pool.json")
@@ -282,4 +288,5 @@ __all__ = [
     "SIDEBOARD_SIZE",
     "SideboardSlot",
     "load_database",
+    "load_reference_sideboard",
 ]

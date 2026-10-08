@@ -1,0 +1,15 @@
+{
+  "_comment": "Sideboard de referência da lista original de Boros Energy. Não é usado na busca: serve de comparação na validação (python main.py --compare ...). Todas as cartas precisam estar em sideboard_pool.json.",
+  "name": "referencia",
+  "cards": {
+    "High Noon": 2,
+    "Sanctifier en-Vec": 2,
+    "Vexing Bauble": 2,
+    "Blood Moon": 1,
+    "Wear // Tear": 1,
+    "The Legend of Roku": 1,
+    "Obsidian Charmaw": 2,
+    "Wrath of the Skies": 2,
+    "Rest in Peace": 2
+  }
+}
