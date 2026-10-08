@@ -145,6 +145,30 @@ Um arquivo por execução: `context` (identificador de motor + decks), `engine`,
 uma lista de `[oponente, [cartas que entraram], [cartas que saíram], série, jogo, começou jogando,
 venceu]`.
 
+## Gráficos (`estatistica.py`)
+
+`python estatistica.py` lê `resultados/resultado.json` (e `comparacao.json`, se existir na mesma
+pasta) e grava as figuras em `resultados/graficos/`. Opções: `--resultado`, `--comparacao`,
+`--saida` e `--formato` (`png`, `pdf` ou `svg`). Requer `matplotlib`.
+
+| Figura | Conteúdo | Fonte |
+|---|---|---|
+| `convergencia` | Melhor fitness e média ± desvio por geração, com a validação como referência | `history` |
+| `pesos_evolucao` | Pesos do melhor indivíduo a cada geração | `history[].weights` |
+| `pesos_finais` | Pesos finais dos 9 atributos | `final.weights` |
+| `sideboard` | Cópias e score de cada carta escolhida | `final.sideboard` |
+| `jogos_acumulados` | Jogos pós-side simulados e reaproveitados do cache | `history` |
+| `validacao_confrontos` | Bo3 com e sem sideboard por oponente, com IC 95% | `validation` |
+| `ganho_sideboard` | Ganho do sideboard por oponente e no metajogo, com IC 95% | `validation` |
+| `md1_vs_bo3` | Md1 e Bo3 por oponente (ΔWinRate) | `validation.sideboard` |
+| `efeito_trocas_metajogo` | Efeito por cópia de cada carta que entra, com IC 95% | `swap_analysis.metagame` |
+| `efeito_trocas_entra`, `efeito_trocas_sai` | Efeito de cada carta por oponente | `swap_analysis.opponents` |
+| `comparacao_sideboards`, `comparacao_diferencas` | Bo3 por sideboard e diferenças pareadas | `comparacao.json` |
+
+As figuras de validação não são geradas a partir de `resultado_parcial.json`, e as de efeito das
+trocas ficam de fora no plano `afinidade`. O IC por oponente em `ganho_sideboard` é conservador,
+como o de `validation.gain_ci95`: ignora que os Games 1 são compartilhados.
+
 ## Qual número usar no texto
 
 | Pergunta | Onde |
